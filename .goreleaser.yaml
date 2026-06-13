@@ -1,0 +1,34 @@
+version: 2
+before:
+  hooks:
+    - go mod tidy
+
+# This project ships as a Docker image (see .github/workflows/docker.yml), not as
+# standalone binaries. GoReleaser is used only to cut the GitHub Release and
+# generate the changelog, so binary builds are skipped.
+builds:
+  - skip: true
+
+changelog:
+  use: github
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Enhancements"
+      regexp: "^.*chore[(\\w)]*:+.*$"
+      order: 2
+    - title: "Refactor"
+      regexp: "^.*refactor[(\\w)]*:+.*$"
+      order: 3
+    - title: "Build process updates"
+      regexp: ^.*?(build|ci)(\(.+\))??!?:.+$
+      order: 4
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 4
+    - title: Others
+      order: 999
