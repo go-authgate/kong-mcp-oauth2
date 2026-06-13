@@ -10,5 +10,5 @@ LICENSE
 *.excalidraw
 # Compiled plugin binaries (built locally or in the build stage, never shipped
 # in the context).
-mcp-authgate
-mcp-authgate-linux
+mcp-oauth2
+mcp-oauth2-linux

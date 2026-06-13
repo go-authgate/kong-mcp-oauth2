@@ -1,6 +1,6 @@
 # kong-mcp-oauth2 安裝與驗證手冊（接真 AuthGate · macOS 實機操作版）
 
-這份手冊帶你在 **macOS** 上，把 `mcp-authgate` plugin 跑起來，並接上一個**真正的
+這份手冊帶你在 **macOS** 上，把 `mcp-oauth2` plugin 跑起來，並接上一個**真正的
 AuthGate**（授權伺服器）完整走完 MCP OAuth 握手，逐列驗證安全性質。
 
 > 本手冊只依賴此 repo 自身的檔案與一個你自己架的 AuthGate，**不需要**任何其他
@@ -14,13 +14,13 @@ AuthGate**（授權伺服器）完整走完 MCP OAuth 握手，逐列驗證安�
 
 ## 0. 前置需求
 
-| 工具                 | 確認指令                                             | 備註                                                          |
-| -------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
-| Go 1.25.10+          | `go version`                                         | 編譯 plugin（`go.mod` 的 `go` 指令為 1.25.10）                |
-| Docker               | `docker version`                                     | Docker Desktop、colima、OrbStack 皆可                         |
-| Docker Compose       | `docker compose version` 或 `docker-compose version` | v2 即可。本機若只有獨立版 `docker-compose`，下面指令照用即可  |
-| curl / openssl       | 內建                                                 | 驗證用                                                        |
-| jq / python3         | 內建 / `brew install jq`                             | 解析 token endpoint 回傳的 JSON、解碼 JWT claims              |
+| 工具                    | 確認指令                                                         | 備註                                                           |
+| ----------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| Go 1.25.10+             | `go version`                                                     | 編譯 plugin（`go.mod` 的 `go` 指令為 1.25.10）                 |
+| Docker                  | `docker version`                                                 | Docker Desktop、colima、OrbStack 皆可                          |
+| Docker Compose          | `docker compose version` 或 `docker-compose version`             | v2 即可。本機若只有獨立版 `docker-compose`，下面指令照用即可   |
+| curl / openssl          | 內建                                                             | 驗證用                                                         |
+| jq / python3            | 內建 / `brew install jq`                                         | 解析 token endpoint 回傳的 JSON、解碼 JWT claims               |
 | **一個跑著的 AuthGate** | `curl -s http://localhost:8080/.well-known/openid-configuration` | 本手冊假設 AuthGate 跑在 macOS host 的 `http://localhost:8080` |
 
 > **colima 使用者**：先確認 daemon 起來了（`colima status`，沒有就 `colima start`）。
@@ -62,17 +62,17 @@ go-pdk plugin 是一支普通的執行檔（講 pluginserver RPC，無 cgo、無
 
 ```bash
 go mod tidy
-go build -o mcp-authgate .
-./mcp-authgate -dump | head        # 應印出 plugin schema（JSON）
+go build -o mcp-oauth2 .
+./mcp-oauth2 -dump | head        # 應印出 plugin schema（JSON）
 ```
 
 **給 Linux 容器掛載用（本手冊主線）——交叉編譯：**
 
 ```bash
 # Apple Silicon：
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o mcp-authgate-linux .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o mcp-oauth2-linux .
 # Intel Mac：把 arm64 換成 amd64
-file mcp-authgate-linux   # 應顯示 ELF 64-bit ... ARM aarch64（或 x86-64）
+file mcp-oauth2-linux   # 應顯示 ELF 64-bit ... ARM aarch64（或 x86-64）
 ```
 
 > `GOARCH` 要對齊 **Docker VM 的架構**，不是你 shell 的架構。Apple Silicon 上的
@@ -106,10 +106,10 @@ curl -s http://localhost:8080/.well-known/openid-configuration \
 **還剩一個**：Kong 在容器裡，容器的 `localhost` 是它自己，不是 macOS host。所以：
 
 | 欄位             | 值                                                       | 為什麼                                                          |
-| ---------------- | ------------------------------------------------------- | -------------------------------------------------------------- |
-| `issuer`         | `http://localhost:8080`                                 | 拿來跟 token 的 `iss` **逐字元比對**（plugin 不連它，只比字串） |
-| `jwks_uri`       | `http://host.docker.internal:8080/.well-known/jwks.json` | 由 **Kong 容器**去抓，要填容器連得到 host 的位址               |
-| `gateway_origin` | `http://localhost:8000`                                 | 不變（這是 Kong proxy，給 host 端 client / 組 PRM URL 用）     |
+| ---------------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| `issuer`         | `http://localhost:8080`                                  | 拿來跟 token 的 `iss` **逐字元比對**（plugin 不連它，只比字串） |
+| `jwks_uri`       | `http://host.docker.internal:8080/.well-known/jwks.json` | 由 **Kong 容器**去抓，要填容器連得到 host 的位址                |
+| `gateway_origin` | `http://localhost:8000`                                  | 不變（這是 Kong proxy，給 host 端 client / 組 PRM URL 用）      |
 
 [`kong.authgate.yml`](kong.authgate.yml) 已經照這樣寫好；
 [`docker-compose.authgate.yml`](docker-compose.authgate.yml) 也已含
@@ -176,7 +176,7 @@ docker-compose -f docker-compose.authgate.yml ps
 
 ```bash
 docker-compose -f docker-compose.authgate.yml logs kong | grep -i pluginserver
-# 應看到 "loading protocol ProtoBuf:1 for plugin mcp-authgate"
+# 應看到 "loading protocol ProtoBuf:1 for plugin mcp-oauth2"
 ```
 
 ---
@@ -234,7 +234,11 @@ curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea
 所以不含 `scopes_supported`）：
 
 ```json
-{"authorization_servers":["http://localhost:8080"],"bearer_methods_supported":["header"],"resource":"http://localhost:8000/mcp/gitea"}
+{
+  "authorization_servers": ["http://localhost:8080"],
+  "bearer_methods_supported": ["header"],
+  "resource": "http://localhost:8000/mcp/gitea"
+}
 ```
 
 ### Row 3 — 有效 token → 轉發到 upstream（200）
@@ -425,38 +429,38 @@ curl -si $GW/mcp/gitea -H "Authorization: Bearer not.a.jwt" | sed -n '1p;$p'
 docker-compose -f docker-compose.authgate.yml down
 
 # 移除編譯產物（已被 .gitignore 忽略）
-rm -f mcp-authgate mcp-authgate-linux
+rm -f mcp-oauth2 mcp-oauth2-linux
 ```
 
 ---
 
 ## 13. 常見問題（macOS）
 
-| 症狀                                                                | 原因 / 解法                                                                                                                                                                                            |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `docker compose up --build` 卡在 `go mod download` 的 x509 憑證錯誤 | 公司網路 TLS 攔截，BuildKit 容器內缺企業根憑證。改走本手冊第 2+7 步的本機交叉編譯 + `docker-compose.authgate.yml`。                                                                                    |
-| Row 3 一直 `503 temporarily_unavailable`                            | Kong 容器抓不到 `jwks_uri`。確認 AuthGate 在跑，且 `jwks_uri` 用 `host.docker.internal`（不是 `127.0.0.1` / `localhost`），且 compose 檔有 `extra_hosts: host.docker.internal:host-gateway`。用第 8 步的無帳密 probe 分辨連線問題。 |
-| Row 3 變成 `401 invalid_token`                                      | 兩個常見原因：① `issuer` 設定值與 token 的 `iss` 不一致（差一個結尾斜線也會錯）；② token 的 `aud` 與 `gateway_origin + resource_path` 不符——取 token 時沒帶 `resource=`（見第 6 步）。解碼 token 比對 `iss` 和 `aud`，要逐字元相同。 |
-| token endpoint 回 `400 invalid_target`                              | 帶了 `resource=` 但該 URL 不在 client 的 `allowed_resources` 白名單（空白名單 = 全拒）。到 AuthGate 的 client 設定把資源 URL 加進 Allowed Resources。見第 6 步。                                       |
-| 有效 token 卻 `403 insufficient_scope`                              | `required_scopes` 要求了 AuthGate 沒發的 scope（例如 `mcp:gitea`，但 AuthGate 只有 `openid profile email`）。改成 AuthGate 真的會發的 scope，或在 AuthGate 端註冊該 scope。見第 5 步。                  |
-| `exec format error` / plugin 起不來                                 | 交叉編譯的 `GOARCH` 跟 Docker VM 架構不符。Apple Silicon 用 `arm64`、Intel 用 `amd64`。                                                                                                                |
-| Kong 啟動就掛在 `failed decoding plugin info: Expected value but found T_END at character 1` | Kong 跑 `QUERY_CMD`（`mcp-authgate -dump`）拿到**空 stdout**。先驗 binary：`docker-compose -f docker-compose.authgate.yml run --rm --entrypoint /usr/local/bin/mcp-authgate kong -dump` 應印出 `{"Protocol":"ProtoBuf:1",...}`。空白 / `exec format error` = binary 與 kong 容器架構錯位（見上一列）。用對的 `GOARCH` 重新交叉編譯（見第 2 步）再 `docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong`。 |
-| `docker compose` 說 unknown command                                 | 你的環境只有獨立版 `docker-compose`。把指令裡的 `docker compose` 換成 `docker-compose` 即可（功能相同）。                                                                                              |
-| 改了 `kong.authgate.yml` 沒生效                                     | DB-less Kong 在啟動時讀設定。改完要 `docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong`。                                                                                      |
+| 症狀                                                                                         | 原因 / 解法                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docker compose up --build` 卡在 `go mod download` 的 x509 憑證錯誤                          | 公司網路 TLS 攔截，BuildKit 容器內缺企業根憑證。改走本手冊第 2+7 步的本機交叉編譯 + `docker-compose.authgate.yml`。                                                                                                                                                                                                                                                                                                         |
+| Row 3 一直 `503 temporarily_unavailable`                                                     | Kong 容器抓不到 `jwks_uri`。確認 AuthGate 在跑，且 `jwks_uri` 用 `host.docker.internal`（不是 `127.0.0.1` / `localhost`），且 compose 檔有 `extra_hosts: host.docker.internal:host-gateway`。用第 8 步的無帳密 probe 分辨連線問題。                                                                                                                                                                                         |
+| Row 3 變成 `401 invalid_token`                                                               | 兩個常見原因：① `issuer` 設定值與 token 的 `iss` 不一致（差一個結尾斜線也會錯）；② token 的 `aud` 與 `gateway_origin + resource_path` 不符——取 token 時沒帶 `resource=`（見第 6 步）。解碼 token 比對 `iss` 和 `aud`，要逐字元相同。                                                                                                                                                                                        |
+| token endpoint 回 `400 invalid_target`                                                       | 帶了 `resource=` 但該 URL 不在 client 的 `allowed_resources` 白名單（空白名單 = 全拒）。到 AuthGate 的 client 設定把資源 URL 加進 Allowed Resources。見第 6 步。                                                                                                                                                                                                                                                            |
+| 有效 token 卻 `403 insufficient_scope`                                                       | `required_scopes` 要求了 AuthGate 沒發的 scope（例如 `mcp:gitea`，但 AuthGate 只有 `openid profile email`）。改成 AuthGate 真的會發的 scope，或在 AuthGate 端註冊該 scope。見第 5 步。                                                                                                                                                                                                                                      |
+| `exec format error` / plugin 起不來                                                          | 交叉編譯的 `GOARCH` 跟 Docker VM 架構不符。Apple Silicon 用 `arm64`、Intel 用 `amd64`。                                                                                                                                                                                                                                                                                                                                     |
+| Kong 啟動就掛在 `failed decoding plugin info: Expected value but found T_END at character 1` | Kong 跑 `QUERY_CMD`（`mcp-oauth2 -dump`）拿到**空 stdout**。先驗 binary：`docker-compose -f docker-compose.authgate.yml run --rm --entrypoint /usr/local/bin/mcp-oauth2 kong -dump` 應印出 `{"Protocol":"ProtoBuf:1",...}`。空白 / `exec format error` = binary 與 kong 容器架構錯位（見上一列）。用對的 `GOARCH` 重新交叉編譯（見第 2 步）再 `docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong`。 |
+| `docker compose` 說 unknown command                                                          | 你的環境只有獨立版 `docker-compose`。把指令裡的 `docker compose` 換成 `docker-compose` 即可（功能相同）。                                                                                                                                                                                                                                                                                                                   |
+| 改了 `kong.authgate.yml` 沒生效                                                              | DB-less Kong 在啟動時讀設定。改完要 `docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong`。                                                                                                                                                                                                                                                                                                           |
 
 ---
 
 ## 附錄：驗證結果速查
 
-| #   | 測試                 | 指令重點                                                     | 預期                                                |
-| --- | -------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
-| 1   | 未認證挑戰           | `curl -si $GW/mcp/gitea`                                     | 401 + `WWW-Authenticate`                            |
-| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea` | JSON（resource / authorization_servers）            |
-| 3   | 有效 token           | `Bearer $GOOD`（resource 綁定 + scope 都要對）              | 200，轉發 upstream                                  |
-| 5a  | 缺 scope             | `Bearer $NOSCOPE`（aud 對、scope 錯）                        | 403 insufficient_scope                             |
-| 5b  | audience 不符 / 相符 | 綁 gitea 的 token 打 sentry / 綁對 aud                       | 401 / 200                                           |
-| 5c  | HS256 偽造           | 手刻 HS256（免 token 來源）                                  | 401（alg confusion 被擋）                          |
-| 10a | 偽造身分 header      | 同時帶 `X-MCP-Subject: attacker`                            | 被覆寫成 token 的 `sub`                            |
-| 10b | 重複 Authorization   | 兩個 `Authorization` header                                  | 400                                                 |
-| 10c | 垃圾 token           | `Bearer not.a.jwt`                                           | 401                                                 |
-| 8   | JWKS 連線 probe      | 手刻 RS256 垃圾簽章 token                                    | 401 = 連線 OK / 503 = JWKS 抓不到                  |
+| #   | 測試                 | 指令重點                                                     | 預期                                     |
+| --- | -------------------- | ------------------------------------------------------------ | ---------------------------------------- |
+| 1   | 未認證挑戰           | `curl -si $GW/mcp/gitea`                                     | 401 + `WWW-Authenticate`                 |
+| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea` | JSON（resource / authorization_servers） |
+| 3   | 有效 token           | `Bearer $GOOD`（resource 綁定 + scope 都要對）               | 200，轉發 upstream                       |
+| 5a  | 缺 scope             | `Bearer $NOSCOPE`（aud 對、scope 錯）                        | 403 insufficient_scope                   |
+| 5b  | audience 不符 / 相符 | 綁 gitea 的 token 打 sentry / 綁對 aud                       | 401 / 200                                |
+| 5c  | HS256 偽造           | 手刻 HS256（免 token 來源）                                  | 401（alg confusion 被擋）                |
+| 10a | 偽造身分 header      | 同時帶 `X-MCP-Subject: attacker`                             | 被覆寫成 token 的 `sub`                  |
+| 10b | 重複 Authorization   | 兩個 `Authorization` header                                  | 400                                      |
+| 10c | 垃圾 token           | `Bearer not.a.jwt`                                           | 401                                      |
+| 8   | JWKS 連線 probe      | 手刻 RS256 垃圾簽章 token                                    | 401 = 連線 OK / 503 = JWKS 抓不到        |

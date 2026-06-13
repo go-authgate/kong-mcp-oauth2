@@ -1,4 +1,4 @@
-# Kong DB-less declarative config — one mcp-authgate plugin per MCP server.
+# Kong DB-less declarative config — one mcp-oauth2 plugin per MCP server.
 #
 # The same plugin protects every MCP service; only `resource_path`,
 # `required_scopes`, and the upstream `url` change. Swap the example.com
@@ -22,7 +22,7 @@ services:
         # the original /mcp/gitea path.
         strip_path: true
     plugins:
-      - name: mcp-authgate
+      - name: mcp-oauth2
         config:
           issuer: https://auth.example.com
           gateway_origin: https://gw.example.com
@@ -52,7 +52,7 @@ services:
           - /.well-known/oauth-protected-resource/mcp/sentry
         strip_path: true
     plugins:
-      - name: mcp-authgate
+      - name: mcp-oauth2
         config:
           issuer: https://auth.example.com
           gateway_origin: https://gw.example.com

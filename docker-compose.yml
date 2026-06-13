@@ -1,4 +1,4 @@
-# Minimal DB-less Kong running the mcp-authgate Go plugin.
+# Minimal DB-less Kong running the mcp-oauth2 Go plugin.
 #
 #   docker compose up --build
 #
@@ -27,10 +27,10 @@ services:
       KONG_ADMIN_LISTEN: "127.0.0.1:8001"
 
       # Register the Go plugin and wire the pluginserver to its binary.
-      KONG_PLUGINS: "bundled,mcp-authgate"
-      KONG_PLUGINSERVER_NAMES: "mcp-authgate"
-      KONG_PLUGINSERVER_MCP_AUTHGATE_START_CMD: "/usr/local/bin/mcp-authgate"
-      KONG_PLUGINSERVER_MCP_AUTHGATE_QUERY_CMD: "/usr/local/bin/mcp-authgate -dump"
+      KONG_PLUGINS: "bundled,mcp-oauth2"
+      KONG_PLUGINSERVER_NAMES: "mcp-oauth2"
+      KONG_PLUGINSERVER_MCP_OAUTH2_START_CMD: "/usr/local/bin/mcp-oauth2"
+      KONG_PLUGINSERVER_MCP_OAUTH2_QUERY_CMD: "/usr/local/bin/mcp-oauth2 -dump"
     volumes:
       - ./kong.yml:/kong/kong.yml:ro
 

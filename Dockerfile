@@ -19,10 +19,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-  go build -trimpath -ldflags="-s -w" -o /mcp-authgate .
+  go build -trimpath -ldflags="-s -w" -o /mcp-oauth2 .
 
 FROM kong:3.9
-COPY --from=build /mcp-authgate /usr/local/bin/mcp-authgate
+COPY --from=build /mcp-oauth2 /usr/local/bin/mcp-oauth2
 USER kong
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD kong health

@@ -27,7 +27,7 @@ services:
           - /.well-known/oauth-protected-resource/mcp/gitea
         strip_path: true
     plugins:
-      - name: mcp-authgate
+      - name: mcp-oauth2
         config:
           issuer: http://localhost:8080
           gateway_origin: http://localhost:8000
@@ -35,7 +35,7 @@ services:
           jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
           required_scopes: []
           # aud enforced: tokens must carry aud == http://localhost:8000/mcp/gitea.
-          # Mint them with RFC 8707 resource binding (HANDS-ON.zh-TW.md §8.4 / §8.7):
+          # Mint them with RFC 8707 resource binding (HANDS-ON.zh-TW.md §6 / §9):
           #   1) add http://localhost:8000/mcp/gitea to the client's
           #      allowed_resources in AuthGate (empty allowlist = deny-all), and
           #   2) send resource=http://localhost:8000/mcp/gitea on /oauth/token.
@@ -55,7 +55,7 @@ services:
           - /.well-known/oauth-protected-resource/mcp/sentry
         strip_path: true
     plugins:
-      - name: mcp-authgate
+      - name: mcp-oauth2
         config:
           issuer: http://localhost:8080
           gateway_origin: http://localhost:8000

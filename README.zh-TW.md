@@ -4,7 +4,7 @@
 >
 > 接真 AuthGate 的 macOS 實機操作手冊請見 [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md)。
 
-`mcp-authgate` 是一個 Kong [go-pdk](https://github.com/Kong/go-pdk) plugin（依
+`mcp-oauth2` 是一個 Kong [go-pdk](https://github.com/Kong/go-pdk) plugin（依
 Kong 官方[Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)
 指南開發），在**所有 MCP server 前面架起單一的 OAuth 入口**。公司內部的 MCP 服務本來就掛在
 [Kong](https://github.com/Kong/kong) 後面；這個 plugin 讓它們不再接受各自手填的
@@ -26,7 +26,7 @@ token，再帶上 `X-MCP-Subject` / `X-MCP-Scope` 轉送到後端。可編輯原
 ```mermaid
 graph LR
     client["MCP client<br/>（自己跑 PKCE）"]
-    kong["Kong<br/>+ mcp-authgate plugin"]
+    kong["Kong<br/>+ mcp-oauth2 plugin"]
     authgate["AuthGate<br/>授權伺服器"]
     mcp["MCP server(s)<br/>gitea / sentry"]
 
@@ -49,7 +49,7 @@ Metadata 與 RFC 6750 bearer token 之上）。編號對應 `main.go` 裡的註�
 ```mermaid
 sequenceDiagram
     participant C as MCP client
-    participant K as Kong + mcp-authgate
+    participant K as Kong + mcp-oauth2
     participant A as AuthGate
     participant M as MCP server
 
@@ -129,7 +129,7 @@ go-pdk plugin 是會講 pluginserver RPC 協定的一般執行檔——不用 cg
 完整 `go build` 需要網路（go-pdk 的 protobuf 相依），請在 repo 根目錄跑：
 
 ```bash
-go mod tidy && go build -o mcp-authgate .
+go mod tidy && go build -o mcp-oauth2 .
 ```
 
 ## 2. 接進 Kong
@@ -137,10 +137,10 @@ go mod tidy && go build -o mcp-authgate .
 註冊 plugin，並把 pluginserver 指向 binary（環境變數，見 `docker-compose.yml`）：
 
 ```bash
-KONG_PLUGINS=bundled,mcp-authgate
-KONG_PLUGINSERVER_NAMES=mcp-authgate
-KONG_PLUGINSERVER_MCP_AUTHGATE_START_CMD=/usr/local/bin/mcp-authgate
-KONG_PLUGINSERVER_MCP_AUTHGATE_QUERY_CMD=/usr/local/bin/mcp-authgate -dump
+KONG_PLUGINS=bundled,mcp-oauth2
+KONG_PLUGINSERVER_NAMES=mcp-oauth2
+KONG_PLUGINSERVER_MCP_OAUTH2_START_CMD=/usr/local/bin/mcp-oauth2
+KONG_PLUGINSERVER_MCP_OAUTH2_QUERY_CMD=/usr/local/bin/mcp-oauth2 -dump
 ```
 
 ## 3. 啟動示範環境

@@ -4,7 +4,7 @@
 >
 > Hands-on macOS walkthrough against a real AuthGate: [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md) (繁體中文)
 
-`mcp-authgate` is a Kong [go-pdk](https://github.com/Kong/go-pdk) plugin — built
+`mcp-oauth2` is a Kong [go-pdk](https://github.com/Kong/go-pdk) plugin — built
 following Kong's [Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)
 guide — that puts **one OAuth front door in front of every MCP server**. Internal MCP services already sit
 behind [Kong](https://github.com/Kong/kong); this plugin makes them stop
@@ -28,7 +28,7 @@ below are the lightweight, GitHub-rendered version of the same flow.
 ```mermaid
 graph LR
     client["MCP client<br/>(runs PKCE itself)"]
-    kong["Kong<br/>+ mcp-authgate plugin"]
+    kong["Kong<br/>+ mcp-oauth2 plugin"]
     authgate["AuthGate<br/>Authorization Server"]
     mcp["MCP server(s)<br/>gitea / sentry"]
 
@@ -52,7 +52,7 @@ Protected Resource Metadata and RFC 6750 bearer tokens). The numbers map to the
 ```mermaid
 sequenceDiagram
     participant C as MCP client
-    participant K as Kong + mcp-authgate
+    participant K as Kong + mcp-oauth2
     participant A as AuthGate
     participant M as MCP server
 
@@ -138,7 +138,7 @@ go-pdk plugins are ordinary executables that speak the pluginserver RPC protocol
 protobuf transitive deps; run it from the repo root:
 
 ```bash
-go mod tidy && go build -o mcp-authgate .
+go mod tidy && go build -o mcp-oauth2 .
 ```
 
 ## 2. Wire it into Kong
@@ -147,10 +147,10 @@ Register the plugin and point the pluginserver at the binary (env vars, shown in
 `docker-compose.yml`):
 
 ```bash
-KONG_PLUGINS=bundled,mcp-authgate
-KONG_PLUGINSERVER_NAMES=mcp-authgate
-KONG_PLUGINSERVER_MCP_AUTHGATE_START_CMD=/usr/local/bin/mcp-authgate
-KONG_PLUGINSERVER_MCP_AUTHGATE_QUERY_CMD=/usr/local/bin/mcp-authgate -dump
+KONG_PLUGINS=bundled,mcp-oauth2
+KONG_PLUGINSERVER_NAMES=mcp-oauth2
+KONG_PLUGINSERVER_MCP_OAUTH2_START_CMD=/usr/local/bin/mcp-oauth2
+KONG_PLUGINSERVER_MCP_OAUTH2_QUERY_CMD=/usr/local/bin/mcp-oauth2 -dump
 ```
 
 ## 3. Run the demo stack
