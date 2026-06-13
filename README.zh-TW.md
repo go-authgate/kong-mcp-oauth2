@@ -1,5 +1,12 @@
 # kong-mcp-oauth2 — MCP 統一 OAuth 入口（Kong + AuthGate）
 
+[![Docker Image](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/docker.yml/badge.svg)](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/docker.yml)
+[![Trivy Security Scan](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/security.yml/badge.svg)](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/security.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/go-authgate/kong-mcp-oauth2)](https://goreportcard.com/report/github.com/go-authgate/kong-mcp-oauth2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-authgate/kong-mcp-oauth2.svg)](https://pkg.go.dev/github.com/go-authgate/kong-mcp-oauth2)
+[![Release](https://img.shields.io/github/v/release/go-authgate/kong-mcp-oauth2)](https://github.com/go-authgate/kong-mcp-oauth2/releases)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 > English version: [README.md](README.md)
 >
 > 接真 AuthGate 的 macOS 實機操作手冊請見 [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md)。
