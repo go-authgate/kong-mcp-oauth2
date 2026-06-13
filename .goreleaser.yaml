@@ -1,8 +1,4 @@
 version: 2
-before:
-  hooks:
-    - go mod tidy
-
 # This project ships as a Docker image (see .github/workflows/docker.yml), not as
 # standalone binaries. GoReleaser is used only to cut the GitHub Release and
 # generate the changelog, so binary builds are skipped.
