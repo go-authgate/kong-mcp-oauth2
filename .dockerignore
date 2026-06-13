@@ -1,0 +1,14 @@
+# Keep the image build context to the Go sources: editing docs or the
+# runtime-mounted kong*.yml must not invalidate the build cache.
+*.md
+*.yml
+Dockerfile
+.dockerignore
+.gitignore
+LICENSE
+*.svg
+*.excalidraw
+# Compiled plugin binaries (built locally or in the build stage, never shipped
+# in the context).
+mcp-authgate
+mcp-authgate-linux

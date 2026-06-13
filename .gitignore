@@ -8,6 +8,11 @@
 *.so
 *.dylib
 
+# Compiled pluginserver binaries (extensionless `go build` output)
+/mcp-authgate
+/mcp-authgate-linux
+/kong-mcp
+
 # Test binary, built with `go test -c`
 *.test
 

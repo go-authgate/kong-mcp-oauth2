@@ -1,0 +1,43 @@
+# Minimal DB-less Kong running the mcp-authgate Go plugin.
+#
+#   docker compose up --build
+#
+# Then exercise the handshake against http://localhost:8000 (see README §4).
+# Point `issuer` / `gateway_origin` / `jwks_uri` in kong.yml at your real
+# AuthGate before expecting tokens to validate.
+services:
+  kong:
+    build: .
+    ports:
+      - "8000:8000" # proxy (MCP traffic enters here)
+    depends_on:
+      - mcp-gitea
+      - mcp-sentry
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      # The admin API is unauthenticated and can replace the whole gateway
+      # config (POST /config) even DB-less, so bind it to the container's
+      # loopback only: unreachable from other compose containers (the MCP
+      # upstreams here) and not published to the host. The demo loads its
+      # config from KONG_DECLARATIVE_CONFIG, so the admin API isn't needed to
+      # run it; bind it to 0.0.0.0 (and publish the port) only for ad-hoc
+      # debugging on a trusted network.
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+
+      # Register the Go plugin and wire the pluginserver to its binary.
+      KONG_PLUGINS: "bundled,mcp-authgate"
+      KONG_PLUGINSERVER_NAMES: "mcp-authgate"
+      KONG_PLUGINSERVER_MCP_AUTHGATE_START_CMD: "/usr/local/bin/mcp-authgate"
+      KONG_PLUGINSERVER_MCP_AUTHGATE_QUERY_CMD: "/usr/local/bin/mcp-authgate -dump"
+    volumes:
+      - ./kong.yml:/kong/kong.yml:ro
+
+  # Stand-in MCP upstreams so routes resolve. Replace with your real MCP servers.
+  mcp-gitea:
+    image: hashicorp/http-echo
+    command: ["-text", "hello from mcp-gitea", "-listen", ":3000"]
+  mcp-sentry:
+    image: hashicorp/http-echo
+    command: ["-text", "hello from mcp-sentry", "-listen", ":3000"]

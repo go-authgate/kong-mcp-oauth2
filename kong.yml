@@ -1,0 +1,67 @@
+# Kong DB-less declarative config — one mcp-authgate plugin per MCP server.
+#
+# The same plugin protects every MCP service; only `resource_path`,
+# `required_scopes`, and the upstream `url` change. Swap the example.com
+# hosts for your AuthGate and gateway origins before loading.
+#
+# IMPORTANT: each route must ALSO match its Protected Resource Metadata path
+# (/.well-known/oauth-protected-resource + resource_path), otherwise Kong has
+# no route to hand the client's PRM lookup to and the plugin never runs.
+_format_version: "3.0"
+
+services:
+  - name: mcp-gitea
+    url: http://mcp-gitea:3000
+    routes:
+      - name: mcp-gitea
+        paths:
+          - /mcp/gitea
+          - /.well-known/oauth-protected-resource/mcp/gitea
+        # Kong's default, spelled out because it decides what the upstream
+        # sees: true -> the MCP server serves "/"; set false if it expects
+        # the original /mcp/gitea path.
+        strip_path: true
+    plugins:
+      - name: mcp-authgate
+        config:
+          issuer: https://auth.example.com
+          gateway_origin: https://gw.example.com
+          resource_path: /mcp/gitea
+          # Optional: omit to auto-discover from the issuer's AS metadata
+          # (RFC 8414). Spelled out here because the demo issuer is a
+          # placeholder; keep it explicit whenever Kong reaches AuthGate on a
+          # different host than clients do (see kong.authgate.yml).
+          jwks_uri: https://auth.example.com/.well-known/jwks.json
+          required_scopes:
+            - mcp:gitea
+          # aud is enforced (secure default): the access token's aud must equal
+          # gateway_origin + resource_path. AuthGate binds it per resource via
+          # RFC 8707 — the client sends resource=<that URL> on /oauth/token and
+          # the URL must be on the client's allowed_resources allowlist.
+          # Set to false only temporarily while debugging token issuance;
+          # while off, tokens are replayable across sibling resources.
+          require_audience: true
+          leeway_seconds: 60
+
+  - name: mcp-sentry
+    url: http://mcp-sentry:3000
+    routes:
+      - name: mcp-sentry
+        paths:
+          - /mcp/sentry
+          - /.well-known/oauth-protected-resource/mcp/sentry
+        strip_path: true
+    plugins:
+      - name: mcp-authgate
+        config:
+          issuer: https://auth.example.com
+          gateway_origin: https://gw.example.com
+          resource_path: /mcp/sentry
+          # jwks_uri omitted on purpose: it is auto-discovered from the
+          # issuer's AS metadata (RFC 8414). See the gitea service above for
+          # the explicit form, and use that form whenever Kong reaches
+          # AuthGate on a different host than clients do.
+          required_scopes:
+            - mcp:sentry
+          require_audience: true
+          leeway_seconds: 60

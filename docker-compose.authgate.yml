@@ -1,0 +1,49 @@
+# DB-less Kong wired to a real AuthGate on the host at http://localhost:8080
+# (via kong.authgate.yml). Instead of building the plugin inside Docker (see
+# docker-compose.yml / Dockerfile), it mounts a locally cross-compiled binary
+# into the stock kong:3.9 image — handy when a TLS-intercepting proxy blocks the
+# in-Docker `go mod download`. Build the binary first:
+#
+#   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o mcp-authgate-linux .
+#   docker-compose -f docker-compose.authgate.yml up -d
+#
+# (GOARCH=amd64 on Intel Macs / x86_64 Docker VMs.)
+services:
+  kong:
+    image: kong:3.9
+    ports:
+      - "8000:8000" # proxy (MCP traffic enters here)
+    depends_on:
+      - mcp-gitea
+      - mcp-sentry
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      # The admin API is unauthenticated and can replace the whole gateway
+      # config (POST /config) even DB-less, so bind it to the container's
+      # loopback only: unreachable from the sibling MCP upstream containers and
+      # not published to the host. Reach it for debugging via
+      # `docker exec <kong container> curl http://127.0.0.1:8001/...`.
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+
+      # Register the Go plugin and wire the pluginserver to its binary.
+      KONG_PLUGINS: "bundled,mcp-authgate"
+      KONG_PLUGINSERVER_NAMES: "mcp-authgate"
+      KONG_PLUGINSERVER_MCP_AUTHGATE_START_CMD: "/usr/local/bin/mcp-authgate"
+      KONG_PLUGINSERVER_MCP_AUTHGATE_QUERY_CMD: "/usr/local/bin/mcp-authgate -dump"
+    extra_hosts:
+      # Lets the plugin reach AuthGate running on the macOS host at
+      # host.docker.internal:8080 (jwks_uri in kong.authgate.yml).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kong.authgate.yml:/kong/kong.yml:ro
+      - ./mcp-authgate-linux:/usr/local/bin/mcp-authgate:ro
+
+  # Stand-in MCP upstreams so routes resolve. Replace with your real MCP servers.
+  mcp-gitea:
+    image: hashicorp/http-echo
+    command: ["-text", "hello from mcp-gitea", "-listen", ":3000"]
+  mcp-sentry:
+    image: hashicorp/http-echo
+    command: ["-text", "hello from mcp-sentry", "-listen", ":3000"]

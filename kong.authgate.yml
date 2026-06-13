@@ -1,0 +1,68 @@
+# Local config wired to a REAL AuthGate running on the macOS host at
+# http://localhost:8080. Use with docker-compose.authgate.yml. The end-to-end
+# hands-on walkthrough is HANDS-ON.zh-TW.md; kong.yml holds the production
+# placeholder form.
+#
+# The localhost-vs-container split (the one gotcha plain HTTP doesn't remove):
+#   - issuer:  matches the token's `iss` claim byte-for-byte. AuthGate's
+#     discovery reports issuer "http://localhost:8080", so that's the value.
+#   - jwks_uri: fetched BY KONG (inside the container), so it must be a host
+#     address the container can reach — host.docker.internal:8080, NOT
+#     localhost:8080 (which, inside the container, is the container itself).
+#   - gateway_origin: the externally reachable Kong proxy, unchanged.
+_format_version: "3.0"
+
+services:
+  # gitea route — frictionless: no scope requirement, so ANY valid AuthGate
+  # access token is forwarded. AuthGate's scopes_supported is only
+  # `openid profile email` (no `mcp:gitea`), so leaving required_scopes here
+  # avoids a guaranteed 403. Register `mcp:gitea` on AuthGate and add it back
+  # to enforce it.
+  - name: mcp-gitea
+    url: http://mcp-gitea:3000
+    routes:
+      - name: mcp-gitea
+        paths:
+          - /mcp/gitea
+          - /.well-known/oauth-protected-resource/mcp/gitea
+        strip_path: true
+    plugins:
+      - name: mcp-authgate
+        config:
+          issuer: http://localhost:8080
+          gateway_origin: http://localhost:8000
+          resource_path: /mcp/gitea
+          jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
+          required_scopes: []
+          # aud enforced: tokens must carry aud == http://localhost:8000/mcp/gitea.
+          # Mint them with RFC 8707 resource binding (HANDS-ON.zh-TW.md §8.4 / §8.7):
+          #   1) add http://localhost:8000/mcp/gitea to the client's
+          #      allowed_resources in AuthGate (empty allowlist = deny-all), and
+          #   2) send resource=http://localhost:8000/mcp/gitea on /oauth/token.
+          # A token minted without it gets 401 invalid_token here.
+          require_audience: true
+          leeway_seconds: 60
+
+  # sentry route — demonstrates scope enforcement using `email`, a scope
+  # AuthGate actually issues. A token requested with `--scope "email"` passes;
+  # one without it gets 403 insufficient_scope.
+  - name: mcp-sentry
+    url: http://mcp-sentry:3000
+    routes:
+      - name: mcp-sentry
+        paths:
+          - /mcp/sentry
+          - /.well-known/oauth-protected-resource/mcp/sentry
+        strip_path: true
+    plugins:
+      - name: mcp-authgate
+        config:
+          issuer: http://localhost:8080
+          gateway_origin: http://localhost:8000
+          resource_path: /mcp/sentry
+          jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
+          required_scopes:
+            - email
+          # same as gitea: bind via resource=http://localhost:8000/mcp/sentry
+          require_audience: true
+          leeway_seconds: 60
