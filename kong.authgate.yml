@@ -33,7 +33,8 @@ services:
           gateway_origin: http://localhost:8000
           resource_path: /mcp/gitea
           jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
-          required_scopes: []
+          required_scopes:
+            - mcp:gitea
           # aud enforced: tokens must carry aud == http://localhost:8000/mcp/gitea.
           # Mint them with RFC 8707 resource binding (HANDS-ON.zh-TW.md §6 / §9):
           #   1) add http://localhost:8000/mcp/gitea to the client's
