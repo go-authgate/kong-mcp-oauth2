@@ -1,0 +1,7 @@
+# Keep the build context to the Go sources: docs and tooling must not
+# invalidate the build cache.
+*.md
+Dockerfile
+.dockerignore
+# Compiled binary (built in the build stage, never shipped in the context).
+mcp-server
