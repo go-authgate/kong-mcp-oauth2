@@ -21,6 +21,12 @@ It mounts the handler at `/` because Kong's route uses `strip_path: true`
 (`kong.yml`), so `$GW/mcp/gitea` arrives here as `/`. It listens on `:3000`
 (override with `PORT`) to match `kong.yml`'s `url: http://mcp-gitea:3000`.
 
+The same binary backs multiple Kong routes (`mcp-gitea`, `mcp-sentry`). Each
+sets `MCP_SERVER_NAME` (default `mcp-server`) so its `initialize` response
+advertises the right name; the per-call `subject` / `scope` still come from
+Kong's per-route headers, so the two routes return route-specific identity from
+one image.
+
 ## Run
 
 ```sh

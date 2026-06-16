@@ -46,7 +46,7 @@ func whoami(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallT
 // strip_path: true (kong.yml) — a request to $GW/mcp/gitea arrives here as "/".
 // Factored out so tests can drive it through httptest.
 func newHandler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: "mcp-gitea", Version: "v0.1.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: serverName(), Version: "v0.1.0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Return the X-MCP-Subject and X-MCP-Scope the gateway forwarded",
@@ -71,4 +71,15 @@ func port() string {
 		return p
 	}
 	return "3000"
+}
+
+// serverName returns MCP_SERVER_NAME if set, else "mcp-server". The same binary
+// backs multiple Kong routes (mcp-gitea, mcp-sentry); each sets this so its
+// initialize/serverInfo advertises the right identity. The per-call subject and
+// scope still come from Kong's per-route headers, not from this name.
+func serverName() string {
+	if n := os.Getenv("MCP_SERVER_NAME"); n != "" {
+		return n
+	}
+	return "mcp-server"
 }
