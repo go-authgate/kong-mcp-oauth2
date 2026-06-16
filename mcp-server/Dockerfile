@@ -18,4 +18,8 @@ FROM gcr.io/distroless/static:nonroot
 COPY --from=build /mcp-server /usr/local/bin/mcp-server
 EXPOSE 3000
 USER nonroot:nonroot
+# No shell or curl in distroless, so the binary probes itself: `-health` GETs
+# its own /healthz and exits 0/1. Exec form (no shell needed).
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/mcp-server", "-health"]
 ENTRYPOINT ["/usr/local/bin/mcp-server"]

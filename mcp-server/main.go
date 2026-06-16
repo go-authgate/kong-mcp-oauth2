@@ -9,12 +9,18 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// healthPath is the liveness endpoint. Single source of truth so the handler
+// that serves it and the -health probe that GETs it can't drift.
+const healthPath = "/healthz"
 
 // Output is what `whoami` returns. The SDK infers the output schema from this
 // struct and fills both the structured and unstructured tool result from it.
@@ -41,20 +47,40 @@ func whoami(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallT
 	}, nil
 }
 
-// newHandler builds the MCP server with its single tool and returns the
-// Streamable HTTP handler. It mounts at "/" because Kong's route uses
+// newHandler builds the MCP server with its single tool and returns an HTTP
+// handler. MCP traffic is served at "/" because Kong's route uses
 // strip_path: true (kong.yml) — a request to $GW/mcp/gitea arrives here as "/".
-// Factored out so tests can drive it through httptest.
+// A plain "/healthz" returning 200 is mounted alongside so the container's
+// HEALTHCHECK (and any external probe) can confirm liveness without speaking
+// MCP. Factored out so tests can drive it through httptest.
 func newHandler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName(), Version: "v0.1.0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Return the X-MCP-Subject and X-MCP-Scope the gateway forwarded",
 	}, whoami)
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(healthPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.Handle("/", mcpHandler)
+	return mux
 }
 
 func main() {
+	// -health turns this same binary into a liveness probe: it GETs its own
+	// /healthz and exits 0/1. The distroless image has no shell or curl, so the
+	// HEALTHCHECK can't shell out — re-invoking the binary is the only probe
+	// available. flag.Parse stays cheap for the normal server path.
+	healthCheck := flag.Bool("health", false, "probe the local /healthz endpoint and exit (for container HEALTHCHECK)")
+	flag.Parse()
+	if *healthCheck {
+		os.Exit(runHealthCheck("http://127.0.0.1:" + port() + healthPath))
+	}
+
 	addr := ":" + port()
 
 	slog.Info("mcp-server listening", "addr", addr)
@@ -62,6 +88,25 @@ func main() {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
 	}
+}
+
+// runHealthCheck GETs url and returns a process exit code: 0 when it answers
+// 200, 1 otherwise. The URL is a parameter (main passes the local /healthz)
+// so tests can point it at an httptest server — the same code path the
+// container HEALTHCHECK exercises, minus os.Exit.
+func runHealthCheck(url string) int {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		slog.Error("health check failed", "error", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("health check unhealthy", "status", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 // port returns PORT if set, else 3000 to match kong.yml's upstream and the

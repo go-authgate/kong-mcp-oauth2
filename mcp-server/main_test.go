@@ -69,6 +69,56 @@ func callWhoami(t *testing.T, ts *httptest.Server, headers map[string]string) Ou
 	return out
 }
 
+// Test: /healthz answers 200 OK so the container HEALTHCHECK has something to
+// probe, and MCP traffic on "/" still works alongside it.
+func TestHealthz(t *testing.T) {
+	ts := httptest.NewServer(newHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + healthPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", healthPath, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("%s status = %d, want %d", healthPath, resp.StatusCode, http.StatusOK)
+	}
+
+	// The health endpoint didn't displace MCP traffic on "/".
+	out := callWhoami(t, ts, map[string]string{"X-MCP-Subject": "dave", "X-MCP-Scope": "mcp:gitea"})
+	if out.Subject != "dave" || out.Scope != "mcp:gitea" {
+		t.Errorf("after %s, got %+v, want subject=dave scope=mcp:gitea", healthPath, out)
+	}
+}
+
+// Test: runHealthCheck — the code path the container HEALTHCHECK runs — maps a
+// 200 to exit 0, a non-200 to exit 1, and an unreachable server to exit 1.
+func TestRunHealthCheck(t *testing.T) {
+	// Healthy: real handler serving /healthz answers 200 → exit 0.
+	ts := httptest.NewServer(newHandler())
+	defer ts.Close()
+	if code := runHealthCheck(ts.URL + healthPath); code != 0 {
+		t.Errorf("runHealthCheck(healthy) = %d, want 0", code)
+	}
+
+	// Unhealthy: a 503 → exit 1.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer bad.Close()
+	if code := runHealthCheck(bad.URL); code != 1 {
+		t.Errorf("runHealthCheck(503) = %d, want 1", code)
+	}
+
+	// Unreachable: probe a server we've already closed → connection error → exit 1.
+	down := httptest.NewServer(http.NotFoundHandler())
+	downURL := down.URL
+	down.Close()
+	if code := runHealthCheck(downURL); code != 1 {
+		t.Errorf("runHealthCheck(unreachable) = %d, want 1", code)
+	}
+}
+
 // Test 1: happy path — headers present are echoed back.
 func TestWhoami_HappyPath(t *testing.T) {
 	ts := httptest.NewServer(newHandler())
