@@ -479,6 +479,26 @@ func hasCtrl(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
+// claimToString renders a claim that may be a single string or a JSON array of
+// strings — aud is allowed to be either (RFC 7519 §4.1.3) — into one
+// space-joined value so it can be forwarded as a single header. Non-string
+// array members are skipped; an absent or wrong-typed claim yields "".
+func claimToString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
 func hasAllScopes(scope string, required []string) bool {
 	have := strings.Fields(scope)
 	for _, r := range required {
@@ -599,6 +619,15 @@ func (conf *Config) Access(kong *pdk.PDK) {
 
 	sub, _ := claims["sub"].(string)
 	scope, _ := claims["scope"].(string)
+	iss, _ := claims["iss"].(string)
+	aud := claimToString(claims["aud"])
+	// client_id is the RFC 8693/8707 name; azp is the OIDC equivalent some
+	// authorization servers emit instead. Prefer the spec name, fall back to azp.
+	clientID, _ := claims["client_id"].(string)
+	if clientID == "" {
+		clientID, _ = claims["azp"].(string)
+	}
+	jti, _ := claims["jti"].(string)
 
 	// reject anything that is not an access token: AuthGate signs refresh
 	// tokens with the same key, iss, aud, and scope — only the "type" claim and
@@ -612,15 +641,24 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
-	// sub/scope are forwarded as upstream headers and scope feeds the check
-	// below; a control char (CR/LF) could split a header or smuggle a scope
-	// token (strings.Fields would swallow it). A real AuthGate token never
-	// carries one, so reject rather than forward.
-	if hasCtrl(sub) || hasCtrl(scope) {
-		_ = kong.Log.Info("rejected token with control chars in sub/scope")
+	// every claim here is forwarded as an upstream header (and scope also feeds
+	// the check below); a control char (CR/LF) could split a header or smuggle a
+	// scope token (strings.Fields would swallow it). A real AuthGate token never
+	// carries one, so reject rather than forward. exp is rendered from a number
+	// below, so it can't carry one.
+	if slices.ContainsFunc([]string{sub, scope, iss, aud, clientID, jti}, hasCtrl) {
+		_ = kong.Log.Info("rejected token with control chars in forwarded claims")
 		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
 			"invalid_token", "malformed token claims")
 		return
+	}
+
+	// exp is a JSON number (NumericDate, seconds since epoch); render it as
+	// RFC 3339 UTC so the backend gets a human-readable expiry. Absent or
+	// wrong-typed -> "" -> the header is cleared, never set.
+	var expStr string
+	if exp, ok := claims["exp"].(float64); ok {
+		expStr = time.Unix(int64(exp), 0).UTC().Format(time.RFC3339)
 	}
 
 	if len(conf.RequiredScopes) > 0 && !hasAllScopes(scope, conf.RequiredScopes) {
@@ -637,6 +675,11 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	for _, h := range []struct{ name, value string }{
 		{"X-MCP-Subject", sub},
 		{"X-MCP-Scope", scope},
+		{"X-MCP-Issuer", iss},
+		{"X-MCP-Audience", aud},
+		{"X-MCP-Client", clientID},
+		{"X-MCP-Token-Id", jti},
+		{"X-MCP-Expires", expStr},
 	} {
 		err := kong.ServiceRequest.ClearHeader(h.name)
 		if err == nil && h.value != "" {

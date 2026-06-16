@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,40 @@ func TestWhoami_HappyPath(t *testing.T) {
 	}
 	if out.Scope != "mcp:gitea" {
 		t.Errorf("scope = %q, want %q", out.Scope, "mcp:gitea")
+	}
+}
+
+// Test 1b: the full set of forwarded claim headers is echoed, scope is split
+// into scopes, and server reports this process's identity.
+func TestWhoami_FullIdentity(t *testing.T) {
+	ts := httptest.NewServer(newHandler())
+	defer ts.Close()
+
+	out := callWhoami(t, ts, map[string]string{
+		"X-MCP-Subject":    "alice",
+		"X-MCP-Scope":      "mcp:gitea mcp:sentry",
+		"X-MCP-Issuer":     "https://auth.example.com",
+		"X-MCP-Audience":   "https://gw.example.com/mcp/gitea",
+		"X-MCP-Client":     "cli-app",
+		"X-MCP-Token-Id":   "tok-123",
+		"X-MCP-Expires":    "2026-01-01T00:00:00Z",
+		"X-Forwarded-Host": "gw.example.com",
+	})
+
+	want := Output{
+		Subject:  "alice",
+		Scope:    "mcp:gitea mcp:sentry",
+		Scopes:   []string{"mcp:gitea", "mcp:sentry"},
+		Server:   "mcp-server", // MCP_SERVER_NAME unset in tests -> default
+		Host:     "gw.example.com",
+		Issuer:   "https://auth.example.com",
+		Audience: "https://gw.example.com/mcp/gitea",
+		Client:   "cli-app",
+		TokenID:  "tok-123",
+		Expires:  "2026-01-01T00:00:00Z",
+	}
+	if !reflect.DeepEqual(out, want) {
+		t.Errorf("whoami output\n got %+v\nwant %+v", out, want)
 	}
 }
 

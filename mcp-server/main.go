@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,14 +25,29 @@ const healthPath = "/healthz"
 
 // Output is what `whoami` returns. The SDK infers the output schema from this
 // struct and fills both the structured and unstructured tool result from it.
+//
+// Subject and Scope come from the headers Kong's plugin always sets; the rest
+// are best-effort: the plugin forwards them only when the verified token
+// carried the matching claim, so each is omitempty and may be absent. Server is
+// the one field this process knows on its own (not from Kong) — it answers
+// "which MCP route handled this call" when one binary backs several.
 type Output struct {
-	Subject string `json:"subject" jsonschema:"the X-MCP-Subject the gateway forwarded (token sub)"`
-	Scope   string `json:"scope" jsonschema:"the X-MCP-Scope the gateway forwarded (token scope)"`
+	Subject  string   `json:"subject" jsonschema:"the X-MCP-Subject the gateway forwarded (token sub)"`
+	Scope    string   `json:"scope" jsonschema:"the raw X-MCP-Scope the gateway forwarded (space-delimited token scope)"`
+	Scopes   []string `json:"scopes" jsonschema:"the scope split into individual grants"`
+	Server   string   `json:"server" jsonschema:"which logical MCP server answered (MCP_SERVER_NAME)"`
+	Host     string   `json:"host,omitempty" jsonschema:"the gateway host the client reached (X-Forwarded-Host)"`
+	Issuer   string   `json:"issuer,omitempty" jsonschema:"the token issuer the gateway forwarded (token iss)"`
+	Audience string   `json:"audience,omitempty" jsonschema:"the audience the token was bound to (token aud)"`
+	Client   string   `json:"client,omitempty" jsonschema:"the OAuth client the token was issued to (client_id/azp)"`
+	TokenID  string   `json:"token_id,omitempty" jsonschema:"the token's unique id (token jti)"`
+	Expires  string   `json:"expires,omitempty" jsonschema:"when the access token expires, RFC 3339 (token exp)"`
 }
 
-// whoami reads the two trusted identity headers off the inbound HTTP request
-// that carried the tools/call and returns their values. Headers are re-sent by
-// Kong on every proxied request, so each call sees the caller's identity.
+// whoami reads the trusted identity headers off the inbound HTTP request that
+// carried the tools/call and returns their values, plus this process's own
+// server name. Kong re-sends the headers on every proxied request, so each call
+// sees the caller's identity.
 //
 // req.Extra is nil on transports that don't carry an HTTP request (e.g. stdio),
 // so guard it before reaching for .Header. http.Header.Get is nil-safe, so an
@@ -41,9 +57,21 @@ func whoami(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallT
 	if req != nil && req.Extra != nil {
 		h = req.Extra.Header
 	}
+	scope := h.Get("X-MCP-Scope")
+	// Host comes from X-Forwarded-Host (Kong's default), not the Host header:
+	// Go's HTTP server moves Host out of the header map into req.Host, which the
+	// SDK doesn't expose here, so Get("Host") would always be empty.
 	return nil, Output{
-		Subject: h.Get("X-MCP-Subject"),
-		Scope:   h.Get("X-MCP-Scope"),
+		Subject:  h.Get("X-MCP-Subject"),
+		Scope:    scope,
+		Scopes:   strings.Fields(scope),
+		Server:   serverName(),
+		Host:     h.Get("X-Forwarded-Host"),
+		Issuer:   h.Get("X-MCP-Issuer"),
+		Audience: h.Get("X-MCP-Audience"),
+		Client:   h.Get("X-MCP-Client"),
+		TokenID:  h.Get("X-MCP-Token-Id"),
+		Expires:  h.Get("X-MCP-Expires"),
 	}, nil
 }
 
@@ -57,7 +85,7 @@ func newHandler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName(), Version: "v0.1.0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "whoami",
-		Description: "Return the X-MCP-Subject and X-MCP-Scope the gateway forwarded",
+		Description: "Return the caller identity the gateway forwarded (subject, scope, issuer, audience, client, token id, expiry) and which MCP server answered",
 	}, whoami)
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 

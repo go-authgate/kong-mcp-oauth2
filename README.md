@@ -243,8 +243,10 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
   together for a window so in-flight tokens aren't killed mid-rotation.
 - **Keep access-token TTLs short.** Like any offline validation, a revoked token
   stays valid until its `exp` — minutes, not hours.
-- **The bearer token is forwarded upstream unchanged.** Kong adds `X-MCP-Subject`
-  / `X-MCP-Scope` but does **not** strip or exchange the `Authorization` header,
+- **The bearer token is forwarded upstream unchanged.** Kong adds the `X-MCP-*`
+  identity headers (`Subject` / `Scope` / `Issuer` / `Audience` / `Client` /
+  `Token-Id` / `Expires`) but does **not** strip or exchange the `Authorization`
+  header,
   so each MCP backend receives a live, replayable token. Trust your MCP backends
   accordingly, and keep `require_audience` enabled (the shipped default in every
   example config) so a backend can't reuse a token against a sibling resource —

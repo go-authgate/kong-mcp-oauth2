@@ -225,7 +225,8 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
   在途 token 才不會被誤殺。
 - **access token TTL 設短。** 跟所有離線驗證一樣，被撤銷的 token 會一直有效到它的
   `exp`——以分鐘計、不要以小時計。
-- **bearer token 會原封不動往後送。** Kong 會加上 `X-MCP-Subject` / `X-MCP-Scope`，
+- **bearer token 會原封不動往後送。** Kong 會加上 `X-MCP-*` 身分 header（`Subject`
+  / `Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` / `Expires`），
   但**不會**移除或換掉 `Authorization` header，所以每個 MCP 後端都會拿到一顆可重放的
   有效 token。請據此信任你的 MCP 後端，並維持 `require_audience` 開啟（所有範例
   設定的出廠值），讓後端無法拿 token 去重放到另一個資源——但對**同一個**資源仍可

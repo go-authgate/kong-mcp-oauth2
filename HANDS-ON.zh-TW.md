@@ -346,9 +346,11 @@ HTTP/1.1 401 Unauthorized
 
 ### 10a. 偽造身分 header 會被覆寫（trust-header smuggling）
 
-plugin 在轉發前會**先清掉** client 自帶的 `X-MCP-Subject` / `X-MCP-Scope`，再填入
-**token 裡驗證過的** `sub` / `scope`。後端被告知「無條件信任這兩個 header」，所以
-這道清除是身分不被偽造的關鍵。
+plugin 在轉發前會**先清掉** client 自帶的所有 `X-MCP-*` 身分 header（`Subject` /
+`Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` / `Expires`），再填入
+**token 裡驗證過的**對應 claim（`sub` / `scope` 一定有，其餘視 token 是否帶該 claim
+而定）。後端被告知「無條件信任這些 header」，所以這道清除是身分不被偽造的關鍵。下面
+以 `X-MCP-Subject` / `X-MCP-Scope` 示範，其餘 header 同理。
 
 stub 的 `http-echo` upstream 不會回放 header，要看到效果，臨時把 gitea upstream
 換成會回放 header 的 echo 服務：
