@@ -112,23 +112,22 @@ func TestWhoami_NonMCPRequestDoesNotCrash(t *testing.T) {
 	ts := httptest.NewServer(newHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL)
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		t.Errorf("plain GET returned 200, expected an MCP/HTTP error status")
+	assertNotOK := func(label string, do func() (*http.Response, error)) {
+		t.Helper()
+		resp, err := do()
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("%s returned 200, expected an MCP/HTTP error status", label)
+		}
 	}
 
-	resp, err = http.Post(ts.URL, "application/json", strings.NewReader("{ not json"))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		t.Errorf("malformed POST returned 200, expected an MCP/HTTP error status")
-	}
+	assertNotOK("plain GET", func() (*http.Response, error) { return http.Get(ts.URL) })
+	assertNotOK("malformed POST", func() (*http.Response, error) {
+		return http.Post(ts.URL, "application/json", strings.NewReader("{ not json"))
+	})
 
 	// Server survived: a valid MCP call still works.
 	out := callWhoami(t, ts, map[string]string{"X-MCP-Subject": "carol", "X-MCP-Scope": "mcp:gitea"})
