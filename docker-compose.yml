@@ -34,10 +34,11 @@ services:
     volumes:
       - ./kong.yml:/kong/kong.yml:ro
 
-  # Stand-in MCP upstreams so routes resolve. Replace with your real MCP servers.
+  # Real MCP server: echoes Kong's trusted X-MCP-Subject / X-MCP-Scope headers
+  # back through a `whoami` tool. Listens on :3000 to match kong.yml's upstream.
   mcp-gitea:
-    image: hashicorp/http-echo
-    command: ["-text", "hello from mcp-gitea", "-listen", ":3000"]
+    build: ./mcp-server
+  # Stand-in MCP upstream so the route resolves. Replace with your real server.
   mcp-sentry:
     image: hashicorp/http-echo
     command: ["-text", "hello from mcp-sentry", "-listen", ":3000"]
