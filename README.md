@@ -63,14 +63,14 @@ sequenceDiagram
     participant A as AuthGate
     participant M as MCP server
 
-    C->>K: GET /mcp/gitea (no token)
+    C->>K: GET /mcp/server (no token)
     K-->>C: ② 401 + WWW-Authenticate:<br/>Bearer resource_metadata="‹PRM URL›"
-    C->>K: GET /.well-known/oauth-protected-resource/mcp/gitea
+    C->>K: GET /.well-known/oauth-protected-resource/mcp/server
     K-->>C: ③ 200 Protected Resource Metadata<br/>(authorization_servers, scopes)
     C->>A: Auth Code + PKCE (/authorize, /token)
     A-->>C: RS256 access token
     K-)A: fetch JWKS (cached / auto-rotated)
-    C->>K: GET /mcp/gitea + Bearer ‹jwt›
+    C->>K: GET /mcp/server + Bearer ‹jwt›
     Note over K: ⑤ verify sig(JWKS) + iss + exp + type=access<br/>+ scope (+ aud when require_audience)
     K->>M: forward + X-MCP-Subject / X-MCP-Scope
     M-->>K: 200
@@ -108,7 +108,7 @@ One plugin instance per MCP resource. See `kong.yml` for full examples.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `issuer`           | ✅       | AuthGate base URL. Must equal the token's `iss` claim byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `gateway_origin`   | ✅       | Externally reachable Kong origin, e.g. `https://gw.example.com`. Used to build the PRM URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `resource_path`    | ✅       | This resource's path, e.g. `/mcp/gitea`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `resource_path`    | ✅       | This resource's path, e.g. `/mcp/server`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `jwks_uri`         |          | AuthGate JWKS endpoint (RS256). Accepted algs are always pinned to the RS family. Leave empty to **auto-discover** it from the issuer's AS metadata (RFC 8414 `/.well-known/oauth-authorization-server`, falling back to OIDC discovery; cached 1h, the metadata's `issuer` must match). Set it explicitly when Kong reaches AuthGate on a different host than clients do — e.g. `host.docker.internal` in the compose demos.                                                                                                                                              |
 | `required_scopes`  |          | All listed scopes must be present in the token's `scope`, else `403 insufficient_scope`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `audience`         |          | Expected `aud` for **token validation only**. Defaults to `gateway_origin + resource_path`. The PRM `resource` always stays the canonical URL (RFC 9728 §3.3), so set this only when AuthGate emits a fixed non-URL `aud`.                                                                                                                                                                                                                                                                                                                                                 |
@@ -187,11 +187,11 @@ After `docker compose up`, exercise the handshake. Replace `$GW` with
 
 | #   | Test                         | Command                                                                                 | Expect                                                            |
 | --- | ---------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 1   | Unauthenticated → challenge  | `curl -i $GW/mcp/gitea`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`          |
-| 2   | PRM document served          | `curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea`                            | JSON with `resource`, `authorization_servers`, `scopes_supported` |
-| 3   | Valid token → forwarded      | `curl -i $GW/mcp/gitea -H "Authorization: Bearer $GOOD"`                                | `200` from the MCP upstream                                       |
-| 4   | Expired token                | `curl -i $GW/mcp/gitea -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                               |
-| 5a  | Missing scope                | token without `required_scopes` → `curl -i $GW/mcp/gitea -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                          |
+| 1   | Unauthenticated → challenge  | `curl -i $GW/mcp/server`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`          |
+| 2   | PRM document served          | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server`                            | JSON with `resource`, `authorization_servers`, `scopes_supported` |
+| 3   | Valid token → forwarded      | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | `200` from the MCP upstream                                       |
+| 4   | Expired token                | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                               |
+| 5a  | Missing scope                | token without `required_scopes` → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                          |
 | 5b  | **Cross-audience**           | token issued for a different resource, with `require_audience: true`                    | `401 invalid_token` (aud mismatch)                                |
 | 5c  | **HS256 forgery (key bits)** | forge an HS256 token using the RSA public key as the HMAC secret                        | `401 invalid_token` — **must be rejected** (alg confusion)        |
 
@@ -213,7 +213,7 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
    byte-for-byte (mind the trailing slash).
 4. **`aud` binds to the resource.** The shipped configs enforce `aud`, so every
    token must be requested with RFC 8707 resource binding: add
-   `<gateway_origin + resource_path>` (e.g. `https://gw.example.com/mcp/gitea`)
+   `<gateway_origin + resource_path>` (e.g. `https://gw.example.com/mcp/server`)
    to the OAuth client's `allowed_resources` in AuthGate (an empty allowlist is
    deny-all and the token endpoint answers `invalid_target`), then send
    `resource=<that URL>` on the token request. Decode the token and confirm

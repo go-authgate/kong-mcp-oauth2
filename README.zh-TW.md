@@ -60,14 +60,14 @@ sequenceDiagram
     participant A as AuthGate
     participant M as MCP server
 
-    C->>K: GET /mcp/gitea（未帶 token）
+    C->>K: GET /mcp/server（未帶 token）
     K-->>C: ② 401 + WWW-Authenticate：<br/>Bearer resource_metadata="‹PRM URL›"
-    C->>K: GET /.well-known/oauth-protected-resource/mcp/gitea
+    C->>K: GET /.well-known/oauth-protected-resource/mcp/server
     K-->>C: ③ 200 Protected Resource Metadata<br/>（authorization_servers、scopes）
     C->>A: Auth Code + PKCE（/authorize、/token）
     A-->>C: RS256 access token
     K-)A: 抓 JWKS（快取／自動輪替）
-    C->>K: GET /mcp/gitea + Bearer ‹jwt›
+    C->>K: GET /mcp/server + Bearer ‹jwt›
     Note over K: ⑤ 驗 簽章(JWKS) + iss + exp + type=access<br/>+ scope（aud 僅在 require_audience 時）
     K->>M: 放行 + X-MCP-Subject / X-MCP-Scope
     M-->>K: 200
@@ -104,7 +104,7 @@ JWKS 的抓取、記憶體快取、背景輪替、未知 `kid` 的限流補抓�
 | ------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `issuer`           | ✅   | AuthGate base URL，必須與 token 的 `iss` claim 逐字元相符。                                                                                                                                                                                                                                                                                                                                                                              |
 | `gateway_origin`   | ✅   | 對外可達的 Kong origin，例如 `https://gw.example.com`，用來組出 PRM URL。                                                                                                                                                                                                                                                                                                                                                                |
-| `resource_path`    | ✅   | 此資源的路徑，例如 `/mcp/gitea`。                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `resource_path`    | ✅   | 此資源的路徑，例如 `/mcp/server`。                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `jwks_uri`         |      | AuthGate JWKS endpoint（RS256）。接受的演算法固定鎖在 RS 家族。留空則改由 issuer 的 AS metadata **自動發現**（RFC 8414 `/.well-known/oauth-authorization-server`，失敗時退回 OIDC discovery；快取 1 小時，metadata 的 `issuer` 必須與設定值相符）。當 Kong 連 AuthGate 的位址與 client 不同時（例如 compose 範例裡的 `host.docker.internal`）才需要手動指定。                                                                            |
 | `required_scopes`  |      | token 的 `scope` 必須包含全部所列項目，否則 `403 insufficient_scope`。                                                                                                                                                                                                                                                                                                                                                                   |
 | `audience`         |      | **只影響 token 的 `aud` 驗證**，預設為 `gateway_origin + resource_path`。PRM 的 `resource` 永遠維持 canonical URL（RFC 9728 §3.3），只有在 AuthGate 發固定的非 URL `aud` 時才需要設。                                                                                                                                                                                                                                                    |
@@ -176,11 +176,11 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 
 | #   | 測試項目                   | 指令                                                                                    | 預期結果                                                        |
 | --- | -------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1   | 未認證 → 挑戰              | `curl -i $GW/mcp/gitea`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`        |
-| 2   | 回傳 PRM 文件              | `curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea`                            | JSON 含 `resource`、`authorization_servers`、`scopes_supported` |
-| 3   | 有效 token → 放行          | `curl -i $GW/mcp/gitea -H "Authorization: Bearer $GOOD"`                                | MCP upstream 回 `200`                                           |
-| 4   | 過期 token                 | `curl -i $GW/mcp/gitea -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                             |
-| 5a  | 缺少 scope                 | 沒有 `required_scopes` 的 token → `curl -i $GW/mcp/gitea -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                        |
+| 1   | 未認證 → 挑戰              | `curl -i $GW/mcp/server`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`        |
+| 2   | 回傳 PRM 文件              | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server`                            | JSON 含 `resource`、`authorization_servers`、`scopes_supported` |
+| 3   | 有效 token → 放行          | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | MCP upstream 回 `200`                                           |
+| 4   | 過期 token                 | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                             |
+| 5a  | 缺少 scope                 | 沒有 `required_scopes` 的 token → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                        |
 | 5b  | **跨 audience**            | 為另一個資源簽發的 token，且 `require_audience: true`                                   | `401 invalid_token`（aud 不符）                                 |
 | 5c  | **HS256 偽造（金鑰位元）** | 拿 RSA 公鑰當 HMAC 金鑰偽造一顆 HS256 token                                             | `401 invalid_token` — **必須被擋**（alg confusion）             |
 
@@ -200,7 +200,7 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 3. **iss 一致。** token 的 `iss` 與 plugin 設定的 `issuer` 逐字元相符（注意結尾斜線）。
 4. **`aud` 綁定資源。** 隨附設定都強制檢查 `aud`，所以每顆 token 都要用 RFC 8707
    resource binding 取得：先在 AuthGate 把 `<gateway_origin + resource_path>`
-   （例如 `https://gw.example.com/mcp/gitea`）加進該 OAuth client 的
+   （例如 `https://gw.example.com/mcp/server`）加進該 OAuth client 的
    `allowed_resources`（空白名單 = 全拒，token endpoint 會回 `invalid_target`），
    再於 token 請求帶 `resource=<該 URL>`。解碼 token 確認 `aud` 與 plugin 的
    預期值完全一致。

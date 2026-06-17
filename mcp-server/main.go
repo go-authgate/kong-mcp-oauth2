@@ -77,7 +77,7 @@ func whoami(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallT
 
 // newHandler builds the MCP server with its single tool and returns an HTTP
 // handler. MCP traffic is served at "/" because Kong's route uses
-// strip_path: true (kong.yml) — a request to $GW/mcp/gitea arrives here as "/".
+// strip_path: true (kong.yml) — a request to $GW/mcp/server arrives here as "/".
 // A plain "/healthz" returning 200 is mounted alongside so the container's
 // HEALTHCHECK (and any external probe) can confirm liveness without speaking
 // MCP. Factored out so tests can drive it through httptest.

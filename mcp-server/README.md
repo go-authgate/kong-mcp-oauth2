@@ -34,7 +34,7 @@ own) and exposes a single MCP tool over Streamable HTTP:
     "server": "mcp-server",
     "host": "localhost:8000",
     "issuer": "http://localhost:8080",
-    "audience": "http://localhost:8000/mcp/gitea",
+    "audience": "http://localhost:8000/mcp/server",
     "client": "inspector",
     "token_id": "0b5e...",
     "expires": "2026-06-17T12:34:56Z"
@@ -46,7 +46,7 @@ own) and exposes a single MCP tool over Streamable HTTP:
   `X-Forwarded-Host`.
 
 It mounts the handler at `/` because Kong's route uses `strip_path: true`
-(`kong.yml`), so `$GW/mcp/gitea` arrives here as `/`. It listens on `:3000`
+(`kong.yml`), so `$GW/mcp/server` arrives here as `/`. It listens on `:3000`
 (override with `PORT`) to match `kong.yml`'s `url: http://mcp-server:3000`.
 
 The same binary backs multiple Kong routes (`mcp-server`, `mcp-sentry`). Each
@@ -72,7 +72,7 @@ Through the gateway with the [MCP Inspector](https://github.com/modelcontextprot
 
 ```sh
 npx @modelcontextprotocol/inspector
-# connect to http://localhost:8000/mcp/gitea with a valid bearer token,
+# connect to http://localhost:8000/mcp/server with a valid bearer token,
 # then call `whoami` — it echoes the token's real sub / scope / issuer /
 # audience / client / jti / expiry, plus which server answered.
 ```

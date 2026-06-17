@@ -147,7 +147,7 @@ func TestWhoami_FullIdentity(t *testing.T) {
 		"X-MCP-Subject":    "alice",
 		"X-MCP-Scope":      "mcp:gitea mcp:sentry",
 		"X-MCP-Issuer":     "https://auth.example.com",
-		"X-MCP-Audience":   "https://gw.example.com/mcp/gitea",
+		"X-MCP-Audience":   "https://gw.example.com/mcp/server",
 		"X-MCP-Client":     "cli-app",
 		"X-MCP-Token-Id":   "tok-123",
 		"X-MCP-Expires":    "2026-01-01T00:00:00Z",
@@ -161,7 +161,7 @@ func TestWhoami_FullIdentity(t *testing.T) {
 		Server:   "mcp-server", // MCP_SERVER_NAME unset in tests -> default
 		Host:     "gw.example.com",
 		Issuer:   "https://auth.example.com",
-		Audience: "https://gw.example.com/mcp/gitea",
+		Audience: "https://gw.example.com/mcp/server",
 		Client:   "cli-app",
 		TokenID:  "tok-123",
 		Expires:  "2026-01-01T00:00:00Z",

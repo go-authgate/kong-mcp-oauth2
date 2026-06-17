@@ -15,18 +15,18 @@ services:
     routes:
       - name: mcp-server
         paths:
-          - /mcp/gitea
-          - /.well-known/oauth-protected-resource/mcp/gitea
+          - /mcp/server
+          - /.well-known/oauth-protected-resource/mcp/server
         # Kong's default, spelled out because it decides what the upstream
         # sees: true -> the MCP server serves "/"; set false if it expects
-        # the original /mcp/gitea path.
+        # the original /mcp/server path.
         strip_path: true
     plugins:
       - name: mcp-oauth2
         config:
           issuer: https://auth.example.com
           gateway_origin: https://gw.example.com
-          resource_path: /mcp/gitea
+          resource_path: /mcp/server
           # Optional: omit to auto-discover from the issuer's AS metadata
           # (RFC 8414). Spelled out here because the demo issuer is a
           # placeholder; keep it explicit whenever Kong reaches AuthGate on a

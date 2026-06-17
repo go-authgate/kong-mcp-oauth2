@@ -143,7 +143,7 @@ binding** 發 per-resource `aud`：取 token 時帶 `resource=<該 URL>`，AuthG
 分隔），把兩個資源 URL 加進去：
 
 ```text
-http://localhost:8000/mcp/gitea, http://localhost:8000/mcp/sentry
+http://localhost:8000/mcp/server, http://localhost:8000/mcp/sentry
 ```
 
 > 除錯期間若想先排除 aud 因素，可把 `kong.authgate.yml` 的 `require_audience`
@@ -193,7 +193,7 @@ GW=http://localhost:8000
 header=$(printf '{"alg":"RS256","typ":"JWT","kid":"probe"}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')
 payload=$(printf '{"iss":"http://localhost:8080","exp":9999999999,"type":"access","sub":"probe"}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')
 PROBE="$header.$payload.AAAA"   # 故意給垃圾簽章
-curl -si $GW/mcp/gitea -H "Authorization: Bearer $PROBE" | sed -n '1p;$p'
+curl -si $GW/mcp/server -H "Authorization: Bearer $PROBE" | sed -n '1p;$p'
 ```
 
 - 回 **`401 invalid_token`** → plugin 成功抓到 AuthGate 的 JWKS（只是 kid 對不上 /
@@ -214,20 +214,20 @@ GW=http://localhost:8000
 ### Row 1 — 沒帶 token → 401 挑戰
 
 ```bash
-curl -si $GW/mcp/gitea | sed -n '1p;/WWW-Authenticate/p'
+curl -si $GW/mcp/server | sed -n '1p;/WWW-Authenticate/p'
 ```
 
 預期：
 
 ```text
 HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Bearer resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource/mcp/gitea"
+WWW-Authenticate: Bearer resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource/mcp/server"
 ```
 
 ### Row 2 — PRM 文件（Protected Resource Metadata, RFC 9728）
 
 ```bash
-curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea
+curl -s $GW/.well-known/oauth-protected-resource/mcp/server
 ```
 
 預期（含 `resource`、`authorization_servers`，gitea 路由 `required_scopes: []`
@@ -237,7 +237,7 @@ curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea
 {
   "authorization_servers": ["http://localhost:8080"],
   "bearer_methods_supported": ["header"],
-  "resource": "http://localhost:8000/mcp/gitea"
+  "resource": "http://localhost:8000/mcp/server"
 }
 ```
 
@@ -255,9 +255,9 @@ GOOD=$(curl -s -X POST "$TOKEN_URL" \
   -d grant_type=client_credentials \
   -d client_id=<id> -d client_secret=<secret> \
   -d 'scope=email' \
-  -d 'resource=http://localhost:8000/mcp/gitea' | jq -r .access_token)
+  -d 'resource=http://localhost:8000/mcp/server' | jq -r .access_token)
 
-curl -si $GW/mcp/gitea -H "Authorization: Bearer $GOOD" | sed -n '1p;$p'
+curl -si $GW/mcp/server -H "Authorization: Bearer $GOOD" | sed -n '1p;$p'
 ```
 
 預期：
@@ -326,7 +326,7 @@ header=$(printf '{"alg":"HS256","typ":"JWT","kid":"x"}' | openssl base64 -A | tr
 payload=$(printf '{"iss":"http://localhost:8080","scope":"email","exp":9999999999,"sub":"attacker"}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')
 sig=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -hmac "secret" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
 HS="$header.$payload.$sig"
-curl -si $GW/mcp/gitea -H "Authorization: Bearer $HS" | sed -n '1p;$p'
+curl -si $GW/mcp/server -H "Authorization: Bearer $HS" | sed -n '1p;$p'
 ```
 
 預期（alg 先被擋，連 JWKS 都不會去抓）：
@@ -367,7 +367,7 @@ docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong
 sleep 8
 
 # 3) 帶有效 token（Row 3 的 $GOOD），同時偽造 X-MCP-Subject / X-MCP-Scope
-curl -s $GW/mcp/gitea \
+curl -s $GW/mcp/server \
   -H "Authorization: Bearer $GOOD" \
   -H "X-MCP-Subject: attacker@evil" \
   -H "X-MCP-Scope: admin:everything" \
@@ -392,7 +392,7 @@ docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong
 ### 10b. 重複 Authorization header → 400
 
 ```bash
-curl -si $GW/mcp/gitea \
+curl -si $GW/mcp/server \
   -H "Authorization: Bearer $GOOD" \
   -H "Authorization: token stolen-pat" | sed -n '1p'
 # 預期 HTTP/1.1 400 Bad Request
@@ -407,7 +407,7 @@ curl -si $GW/mcp/gitea \
 ### 10c. 垃圾 token → 401（不是 5xx）
 
 ```bash
-curl -si $GW/mcp/gitea -H "Authorization: Bearer not.a.jwt" | sed -n '1p;$p'
+curl -si $GW/mcp/server -H "Authorization: Bearer not.a.jwt" | sed -n '1p;$p'
 # 預期 401 invalid_token
 ```
 
@@ -456,8 +456,8 @@ rm -f mcp-oauth2 mcp-oauth2-linux
 
 | #   | 測試                 | 指令重點                                                     | 預期                                     |
 | --- | -------------------- | ------------------------------------------------------------ | ---------------------------------------- |
-| 1   | 未認證挑戰           | `curl -si $GW/mcp/gitea`                                     | 401 + `WWW-Authenticate`                 |
-| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/gitea` | JSON（resource / authorization_servers） |
+| 1   | 未認證挑戰           | `curl -si $GW/mcp/server`                                     | 401 + `WWW-Authenticate`                 |
+| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server` | JSON（resource / authorization_servers） |
 | 3   | 有效 token           | `Bearer $GOOD`（resource 綁定 + scope 都要對）               | 200，轉發 upstream                       |
 | 5a  | 缺 scope             | `Bearer $NOSCOPE`（aud 對、scope 錯）                        | 403 insufficient_scope                   |
 | 5b  | audience 不符 / 相符 | 綁 gitea 的 token 打 sentry / 綁對 aud                       | 401 / 200                                |

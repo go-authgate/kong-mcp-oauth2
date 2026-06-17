@@ -75,7 +75,7 @@ var rsMethods = []string{"RS256", "RS384", "RS512"}
 type Config struct {
 	Issuer          string   `json:"issuer"`           // AuthGate base URL == token iss
 	GatewayOrigin   string   `json:"gateway_origin"`   // externally reachable Kong origin
-	ResourcePath    string   `json:"resource_path"`    // e.g. /mcp/gitea
+	ResourcePath    string   `json:"resource_path"`    // e.g. /mcp/server
 	Audience        string   `json:"audience"`         // expected aud; default GatewayOrigin+ResourcePath
 	RequiredScopes  []string `json:"required_scopes"`  // all must be present
 	JWKSURI         string   `json:"jwks_uri"`         // AuthGate JWKS endpoint (RS256); empty => discover via RFC 8414 from Issuer
@@ -116,7 +116,7 @@ func (conf *Config) setup() error {
 
 		// shape checks: a non-empty but malformed path/origin would otherwise
 		// concatenate into a silently-broken PRM URL that no Kong route matches
-		// (e.g. resource_path "mcp/gitea" -> ".../oauth-protected-resourcemcp/gitea"),
+		// (e.g. resource_path "mcp/server" -> ".../oauth-protected-resourcemcp/server"),
 		// failing every request with no diagnostic. Fail loudly instead.
 		var invalid []string
 		if !strings.HasPrefix(conf.ResourcePath, "/") {
