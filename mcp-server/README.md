@@ -31,7 +31,7 @@ own) and exposes a single MCP tool over Streamable HTTP:
     "subject": "alice",
     "scope": "mcp:gitea mcp:sentry",
     "scopes": ["mcp:gitea", "mcp:sentry"],
-    "server": "mcp-gitea",
+    "server": "mcp-server",
     "host": "localhost:8000",
     "issuer": "http://localhost:8080",
     "audience": "http://localhost:8000/mcp/gitea",
@@ -47,9 +47,9 @@ own) and exposes a single MCP tool over Streamable HTTP:
 
 It mounts the handler at `/` because Kong's route uses `strip_path: true`
 (`kong.yml`), so `$GW/mcp/gitea` arrives here as `/`. It listens on `:3000`
-(override with `PORT`) to match `kong.yml`'s `url: http://mcp-gitea:3000`.
+(override with `PORT`) to match `kong.yml`'s `url: http://mcp-server:3000`.
 
-The same binary backs multiple Kong routes (`mcp-gitea`, `mcp-sentry`). Each
+The same binary backs multiple Kong routes (`mcp-server`, `mcp-sentry`). Each
 sets `MCP_SERVER_NAME` (default `mcp-server`) so its `initialize` response — and
 `whoami`'s `server` field — advertises the right name; the per-call identity
 still comes from Kong's per-route headers, so the two routes return

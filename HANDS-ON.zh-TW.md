@@ -264,7 +264,7 @@ curl -si $GW/mcp/gitea -H "Authorization: Bearer $GOOD" | sed -n '1p;$p'
 
 ```text
 HTTP/1.1 200 OK
-hello from mcp-gitea
+hello from mcp-server
 ```
 
 > 想先解碼確認 claims（`aud`、`iss`、`type=access`、header `alg=RS256`）：
@@ -362,7 +362,7 @@ docker run -d --rm --name mcp-echo --network "$NET" mendhak/http-https-echo:31
 
 # 2) 暫時把 kong.authgate.yml 的 gitea upstream 指到 echo，重建 kong
 cp kong.authgate.yml /tmp/kong.authgate.yml.bak
-sed -i '' 's#url: http://mcp-gitea:3000#url: http://mcp-echo:8080#' kong.authgate.yml
+sed -i '' 's#url: http://mcp-server:3000#url: http://mcp-echo:8080#' kong.authgate.yml
 docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong
 sleep 8
 

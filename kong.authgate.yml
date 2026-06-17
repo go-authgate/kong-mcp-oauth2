@@ -18,10 +18,10 @@ services:
   # `openid profile email` (no `mcp:gitea`), so leaving required_scopes here
   # avoids a guaranteed 403. Register `mcp:gitea` on AuthGate and add it back
   # to enforce it.
-  - name: mcp-gitea
-    url: http://mcp-gitea:3000
+  - name: mcp-server
+    url: http://mcp-server:3000
     routes:
-      - name: mcp-gitea
+      - name: mcp-server
         paths:
           - /mcp/gitea
           - /.well-known/oauth-protected-resource/mcp/gitea

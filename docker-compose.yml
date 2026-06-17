@@ -11,7 +11,7 @@ services:
     ports:
       - "8000:8000" # proxy (MCP traffic enters here)
     depends_on:
-      - mcp-gitea
+      - mcp-server
       - mcp-sentry
     environment:
       KONG_DATABASE: "off"
@@ -38,10 +38,10 @@ services:
   # headers back through a `whoami` tool. Same image backs both routes; only the
   # advertised server name differs (MCP_SERVER_NAME) — the per-call sub/scope
   # comes from Kong's per-route headers. Both listen on :3000 to match kong.yml.
-  mcp-gitea:
+  mcp-server:
     build: ./mcp-server
     environment:
-      MCP_SERVER_NAME: mcp-gitea
+      MCP_SERVER_NAME: mcp-server
   mcp-sentry:
     build: ./mcp-server
     environment:

@@ -10,10 +10,10 @@
 _format_version: "3.0"
 
 services:
-  - name: mcp-gitea
-    url: http://mcp-gitea:3000
+  - name: mcp-server
+    url: http://mcp-server:3000
     routes:
-      - name: mcp-gitea
+      - name: mcp-server
         paths:
           - /mcp/gitea
           - /.well-known/oauth-protected-resource/mcp/gitea

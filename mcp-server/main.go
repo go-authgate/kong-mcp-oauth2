@@ -147,7 +147,7 @@ func port() string {
 }
 
 // serverName returns MCP_SERVER_NAME if set, else "mcp-server". The same binary
-// backs multiple Kong routes (mcp-gitea, mcp-sentry); each sets this so its
+// backs multiple Kong routes (mcp-server, mcp-sentry); each sets this so its
 // initialize/serverInfo advertises the right identity. The per-call subject and
 // scope still come from Kong's per-route headers, not from this name.
 func serverName() string {
