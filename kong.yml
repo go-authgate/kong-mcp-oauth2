@@ -33,7 +33,7 @@ services:
           # different host than clients do (see kong.authgate.yml).
           jwks_uri: https://auth.example.com/.well-known/jwks.json
           required_scopes:
-            - mcp:gitea
+            - mcp:server
           # aud is enforced (secure default): the access token's aud must equal
           # gateway_origin + resource_path. AuthGate binds it per resource via
           # RFC 8707 — the client sends resource=<that URL> on /oauth/token and
