@@ -26,6 +26,10 @@ services:
       # debugging on a trusted network.
       KONG_ADMIN_LISTEN: "127.0.0.1:8001"
 
+      # Set log level to info so plugin diagnostics (rejected token, non-access
+      # token, control chars) are visible — Kong's default "notice" suppresses them.
+      KONG_LOG_LEVEL: "info"
+
       # Register the Go plugin and wire the pluginserver to its binary.
       KONG_PLUGINS: "bundled,mcp-oauth2"
       KONG_PLUGINSERVER_NAMES: "mcp-oauth2"
