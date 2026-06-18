@@ -222,6 +222,21 @@ var (
 // defects in the presented token) so Access can answer 503 instead of 401.
 var errJWKSUnavailable = errors.New("JWKS unavailable")
 
+// perKeyLock returns key's construction lock, lazily creating it under mapMu on
+// first use. Callers Lock/Unlock the result to serialize cold construction for
+// that key while leaving other keys (and warm cache reads) unblocked — the
+// shared half of getJWKS's and discoverJWKSURI's double-checked locking.
+func perKeyLock(mapMu *sync.Mutex, locks map[string]*sync.Mutex, key string) *sync.Mutex {
+	mapMu.Lock()
+	defer mapMu.Unlock()
+	mu := locks[key]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		locks[key] = mu
+	}
+	return mu
+}
+
 // getJWKS builds (once per URI) a keyfunc with hourly background refresh and
 // rate-limited refetch on an unknown kid. Unlike keyfunc.NewDefault, a failed
 // first fetch is returned as an error — not cached as an empty key set that
@@ -245,14 +260,7 @@ func getJWKS(uri string) (keyfunc.Keyfunc, error) {
 	// cold path: serialize construction per URI so concurrent first callers
 	// build exactly one keyfunc — but hold only this URI's lock (not jwksMu)
 	// across the blocking fetch below, so other URIs and warm reads never wait.
-	jwksInitMu.Lock()
-	initMu, ok := jwksInit[uri]
-	if !ok {
-		initMu = &sync.Mutex{}
-		jwksInit[uri] = initMu
-	}
-	jwksInitMu.Unlock()
-
+	initMu := perKeyLock(&jwksInitMu, jwksInit, uri)
 	initMu.Lock()
 	defer initMu.Unlock()
 
@@ -410,14 +418,7 @@ func discoverJWKSURI(issuer string) (string, error) {
 	}
 
 	// serialize discovery per issuer; same pattern as getJWKS
-	metaInitMu.Lock()
-	initMu, found := metaInit[issuer]
-	if !found {
-		initMu = &sync.Mutex{}
-		metaInit[issuer] = initMu
-	}
-	metaInitMu.Unlock()
-
+	initMu := perKeyLock(&metaInitMu, metaInit, issuer)
 	initMu.Lock()
 	defer initMu.Unlock()
 
@@ -484,7 +485,7 @@ func exitJSON(kong *pdk.PDK, status int, v any, headers map[string][]string) {
 // byte in a claim that is forwarded as a header value could split or smuggle an
 // upstream header, and in a scope string would be swallowed by strings.Fields.
 func hasCtrl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
+	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }
 
 // claimToString renders a claim that may be a single string or a JSON array of
@@ -649,25 +650,40 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
-	// every claim here is forwarded as an upstream header (and scope also feeds
-	// the check below); a control char (CR/LF) could split a header or smuggle a
-	// scope token (strings.Fields would swallow it). A real AuthGate token never
-	// carries one, so reject rather than forward. exp is rendered from a number
-	// below, so it can't carry one.
-	fields := [6]string{sub, scope, iss, aud, clientID, jti}
-	if !conf.SkipControlChars && slices.ContainsFunc(fields[:], hasCtrl) {
-		_ = kong.Log.Info("rejected token with control chars in forwarded claims")
-		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
-			"invalid_token", "malformed token claims")
-		return
-	}
-
 	// exp is a JSON number (NumericDate, seconds since epoch); render it as
 	// RFC 3339 UTC so the backend gets a human-readable expiry. Absent or
 	// wrong-typed -> "" -> the header is cleared, never set.
 	var expStr string
 	if exp, ok := claims["exp"].(float64); ok {
 		expStr = time.Unix(int64(exp), 0).UTC().Format(time.RFC3339)
+	}
+
+	// the identity surfaced to the MCP backend — one source of truth for both
+	// the control-char guard and the forwarding loop, so the two can never drift.
+	trusted := []struct{ name, value string }{
+		{"X-MCP-Subject", sub},
+		{"X-MCP-Scope", scope},
+		{"X-MCP-Issuer", iss},
+		{"X-MCP-Audience", aud},
+		{"X-MCP-Client", clientID},
+		{"X-MCP-Token-Id", jti},
+		{"X-MCP-Expires", expStr},
+	}
+
+	// every value here is forwarded as an upstream header (and scope also feeds
+	// the check below); a control char (CR/LF) could split a header or smuggle a
+	// scope token (strings.Fields would swallow it). A real AuthGate token never
+	// carries one, so reject rather than forward. (X-MCP-Expires is rendered from
+	// a number, so the guard over it is a harmless no-op.)
+	if !conf.SkipControlChars {
+		for _, h := range trusted {
+			if hasCtrl(h.value) {
+				_ = kong.Log.Info("rejected token with control chars in forwarded claims")
+				challenge(401, conf.bearerMeta+`, error="invalid_token"`,
+					"invalid_token", "malformed token claims")
+				return
+			}
+		}
 	}
 
 	if len(conf.RequiredScopes) > 0 && !hasAllScopes(scope, conf.RequiredScopes) {
@@ -677,22 +693,17 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
-	// surface identity to the MCP backend — clear inbound copies first so a
-	// client can never smuggle its own values through the trusted headers.
-	// Fail closed: if a clear/set is not confirmed, proxying anyway would
-	// forward client-supplied values on headers the backend is told to trust.
-	for _, h := range []struct{ name, value string }{
-		{"X-MCP-Subject", sub},
-		{"X-MCP-Scope", scope},
-		{"X-MCP-Issuer", iss},
-		{"X-MCP-Audience", aud},
-		{"X-MCP-Client", clientID},
-		{"X-MCP-Token-Id", jti},
-		{"X-MCP-Expires", expStr},
-	} {
-		err := kong.ServiceRequest.ClearHeader(h.name)
-		if err == nil && h.value != "" {
+	// surface identity to the MCP backend. SetHeader overrides any inbound copy,
+	// so a client can never smuggle its own values through the trusted headers;
+	// an absent claim instead clears the inbound copy. Fail closed: if a set/clear
+	// is not confirmed, proxying anyway would forward client-supplied values on
+	// headers the backend is told to trust.
+	for _, h := range trusted {
+		var err error
+		if h.value != "" {
 			err = kong.ServiceRequest.SetHeader(h.name, h.value)
+		} else {
+			err = kong.ServiceRequest.ClearHeader(h.name)
 		}
 		if err != nil {
 			_ = kong.Log.Err("failed to set trusted header ", h.name, ": ", err.Error())
