@@ -82,6 +82,12 @@ type Config struct {
 	RequireAudience bool     `json:"require_audience"` // false until AuthGate emits per-resource aud
 	LeewaySeconds   int      `json:"leeway_seconds"`   // clock-skew tolerance for exp/nbf
 
+	// Leniency toggles — disable only when the upstream token issuer is known
+	// to omit these fields or when temporarily debugging.
+	SkipIssuerCheck  bool `json:"skip_issuer_check"`  // accept tokens that lack/mismatch iss
+	SkipTypeCheck    bool `json:"skip_type_check"`    // accept tokens whose type != "access"
+	SkipControlChars bool `json:"skip_control_chars"` // skip CR/LF header-injection guard
+
 	// derived once per instance — Access runs per request, config never changes
 	setupOnce        sync.Once
 	setupErr         error
@@ -169,8 +175,10 @@ func (conf *Config) setup() error {
 
 		opts := []jwt.ParserOption{
 			jwt.WithValidMethods(rsMethods),
-			jwt.WithIssuer(conf.Issuer),
 			jwt.WithExpirationRequired(),
+		}
+		if !conf.SkipIssuerCheck {
+			opts = append(opts, jwt.WithIssuer(conf.Issuer))
 		}
 		if conf.LeewaySeconds > 0 {
 			opts = append(opts, jwt.WithLeeway(time.Duration(conf.LeewaySeconds)*time.Second))
@@ -634,7 +642,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	// a longer exp differ — so without this check a leaked refresh token would
 	// be accepted as a bearer credential, defeating the short access-token TTL.
 	// Mirrors AuthGate's own resource-server validation.
-	if t, _ := claims["type"].(string); t != "access" {
+	if t, _ := claims["type"].(string); t != "access" && !conf.SkipTypeCheck {
 		_ = kong.Log.Info("rejected non-access token; type=", t)
 		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
 			"invalid_token", "not an access token")
@@ -646,7 +654,8 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	// scope token (strings.Fields would swallow it). A real AuthGate token never
 	// carries one, so reject rather than forward. exp is rendered from a number
 	// below, so it can't carry one.
-	if slices.ContainsFunc([]string{sub, scope, iss, aud, clientID, jti}, hasCtrl) {
+	fields := [6]string{sub, scope, iss, aud, clientID, jti}
+	if !conf.SkipControlChars && slices.ContainsFunc(fields[:], hasCtrl) {
 		_ = kong.Log.Info("rejected token with control chars in forwarded claims")
 		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
 			"invalid_token", "malformed token claims")

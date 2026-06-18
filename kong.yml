@@ -42,6 +42,11 @@ services:
           # while off, tokens are replayable across sibling resources.
           require_audience: true
           leeway_seconds: 60
+          # Leniency toggles — all default to false (strict). Enable only when
+          # the upstream token issuer is known to omit a field or for debugging.
+          # skip_issuer_check: true   # issuer still required for discovery/PRM
+          # skip_type_check: true     # accept tokens without type=access
+          # skip_control_chars: true  # disable CR/LF injection guard on headers
 
   - name: mcp-sentry
     url: http://mcp-sentry:3000
