@@ -67,3 +67,34 @@ services:
           # same as gitea: bind via resource=http://localhost:8000/mcp/sentry
           require_audience: true
           leeway_seconds: 60
+
+  - name: mcp-gitea
+    url: http://host.docker.internal:8081/mcp
+    routes:
+      - name: mcp-gitea
+        paths:
+          - /mcp/gitea
+          - /.well-known/oauth-protected-resource/mcp/gitea
+        strip_path: true
+    plugins:
+      - name: mcp-oauth2
+        config:
+          issuer: http://localhost:3000
+          gateway_origin: http://localhost:8000
+          resource_path: /mcp/gitea
+          jwks_uri: http://host.docker.internal:3000/login/oauth/keys
+          # Gitea issues the OIDC scopes openid/profile/email; enforce the two
+          # this route needs. Enable debug_claims (below) to see exactly which
+          # claim carries the granted scopes when diagnosing a 403.
+          required_scopes:
+            - email
+            - profile
+          # same as gitea: bind via resource=http://localhost:8000/mcp/gitea
+          require_audience: false
+          leeway_seconds: 60
+          skip_issuer_check: true
+          skip_type_check: true
+          skip_control_chars: true
+          # dump decoded claims to the debug log (needs KONG_LOG_LEVEL=debug);
+          # off by default elsewhere — enable only while diagnosing 401/403.
+          debug_claims: true
