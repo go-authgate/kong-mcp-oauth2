@@ -88,6 +88,16 @@ type Config struct {
 	SkipTypeCheck    bool `json:"skip_type_check"`    // accept tokens whose type != "access"
 	SkipControlChars bool `json:"skip_control_chars"` // skip CR/LF header-injection guard
 
+	// DebugClaims dumps the full decoded claim set to Kong's debug log for each
+	// request it decodes — an operator aid for seeing which claim carries the
+	// scopes/aud/type behind an unexpected 401/403. OFF by default and gated by
+	// config, NOT by log level alone: kong.Log.Debug ships to Kong on every call
+	// regardless of log_level (go-pdk exposes no level check), so an ungated dump
+	// would add a JSON marshal + a per-request PDK round-trip to every accepted
+	// request for nothing. Claims can contain PII, so enable deliberately and
+	// briefly, together with log_level=debug to actually see the output.
+	DebugClaims bool `json:"debug_claims"`
+
 	// derived once per instance — Access runs per request, config never changes
 	setupOnce        sync.Once
 	setupErr         error
@@ -624,6 +634,19 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
 			"invalid_token", "invalid or expired access token")
 		return
+	}
+
+	// When debug_claims is on, dump the full decoded claim set at debug level so
+	// an operator can see exactly which claim carries the scopes (or aud, type,
+	// etc.) for a given issuer when diagnosing a 401/403. Gated by config rather
+	// than log level alone because kong.Log.Debug ships to Kong on every call
+	// regardless of log_level — so without this guard the marshal + PDK
+	// round-trip would run on every accepted request even at notice level, where
+	// the line is discarded. Set debug_claims=true AND log_level=debug to see it.
+	if conf.DebugClaims {
+		if dbg, err := json.Marshal(claims); err == nil {
+			_ = kong.Log.Debug("decoded token claims: ", string(dbg))
+		}
 	}
 
 	sub, _ := claims["sub"].(string)

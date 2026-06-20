@@ -11,6 +11,10 @@
 # Compiled pluginserver binaries (extensionless `go build` output)
 /mcp-oauth2
 /mcp-oauth2-linux
+/kong-mcp-oauth2
+
+# Local Claude Code MCP server config
+/.mcp.json
 
 # Test binary, built with `go test -c`
 *.test
