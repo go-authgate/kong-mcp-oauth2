@@ -83,12 +83,12 @@ services:
           gateway_origin: http://localhost:8000
           resource_path: /mcp/gitea
           jwks_uri: http://host.docker.internal:3000/login/oauth/keys
-          # Gitea issues the OIDC scopes openid/profile/email; enforce the two
-          # this route needs. Enable debug_claims (below) to see exactly which
-          # claim carries the granted scopes when diagnosing a 403.
-          required_scopes:
-            - email
-            - profile
+          # Gitea's access token carries NO `scope` claim, so any required_scopes
+          # here is an automatic 403 (the plugin can't find scopes it grants).
+          # Leave it unset to forward ANY valid Gitea token; enable debug_claims
+          # (below) to confirm which claims the token actually carries. If Gitea
+          # later starts emitting a scope claim, add the scopes back to enforce.
+          required_scopes: []
           # same as gitea: bind via resource=http://localhost:8000/mcp/gitea
           require_audience: false
           leeway_seconds: 60
