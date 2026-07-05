@@ -55,7 +55,7 @@ func TestAudienceValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		conf    *Config // pointer: Config embeds sync.Once and must not be copied
+		conf    *Config // pointer: Config holds sync.Once fields and must not be copied
 		aud     any     // value of the aud claim; nil = omit the claim
 		wantOK  bool
 		wantErr error // sentinel the failure must carry, so a case can't fail for an unrelated reason (iss/exp/alg)

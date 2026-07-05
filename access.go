@@ -148,7 +148,8 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	}
 
 	// (5) validate RS256 (JWKS) + exp (+ iss and aud unless the matching
-	// skip_* toggle is set)
+	// skip_* toggle is set); type=access is enforced after parsing below,
+	// unless skip_type_check
 	claims := jwt.MapClaims{}
 	if _, err := conf.parser.ParseWithClaims(raw, claims, conf.keyFunc); err != nil {
 		if errors.Is(err, errJWKSUnavailable) {

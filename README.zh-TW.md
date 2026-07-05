@@ -68,7 +68,7 @@ sequenceDiagram
     A-->>C: RS256 access token
     K-)A: 抓 JWKS（快取／自動輪替）
     C->>K: GET /mcp/server + Bearer ‹jwt›
-    Note over K: ⑤ 驗 簽章(JWKS) + iss + exp + type=access<br/>+ scope + aud（除非 skip_audience_check）
+    Note over K: ⑤ 驗 簽章(JWKS) + exp（iss 除非 skip_issuer_check）<br/>+ type=access（除非 skip_type_check）+ scope<br/>+ aud（除非 skip_audience_check）
     K->>M: 放行 + X-MCP-Subject / X-MCP-Scope
     M-->>K: 200
     K-->>C: 200
@@ -79,7 +79,7 @@ sequenceDiagram
 | ②    | Kong → client     | 沒帶 / 帶錯 token 的請求 → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                         |
 | ③    | Kong → client     | client 去抓 `<PRM URL>` → plugin 回傳 Protected Resource Metadata（要用哪個 AuthGate、要哪些 scope）                                                                |
 | —    | client ↔ AuthGate | client 從 metadata 找到 AuthGate，自己跑 **Auth Code + PKCE** 換 access token                                                                                       |
-| ⑤    | Kong              | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + iss + exp + `type=access` + scope + aud**（除非設 `skip_audience_check`）→ 放行往後送 |
+| ⑤    | Kong              | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + exp**（**iss** 除非 `skip_issuer_check`）（**`type=access`** 除非 `skip_type_check`）**+ scope**（**aud** 除非 `skip_audience_check`）→ 放行往後送 |
 
 ## 為什麼選 RS256 + JWKS（不是 HS256）
 
