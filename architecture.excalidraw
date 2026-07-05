@@ -673,8 +673,8 @@
     {
       "type": "text", "id": "verify_text",
       "x": 660, "y": 1086, "width": 240, "height": 116,
-      "text": "⑤  VERIFY — offline, per request\n  ✓ signature · JWKS · RS* only\n  ✓ iss · exp · type = access\n  ✓ scope ⊇ required_scopes\n  ✓ aud  (require_audience)\n  ✗ HS256 forgery → 401",
-      "originalText": "⑤  VERIFY — offline, per request\n  ✓ signature · JWKS · RS* only\n  ✓ iss · exp · type = access\n  ✓ scope ⊇ required_scopes\n  ✓ aud  (require_audience)\n  ✗ HS256 forgery → 401",
+      "text": "⑤  VERIFY — offline, per request\n  ✓ signature · JWKS · RS* only\n  ✓ iss · exp · type = access\n  ✓ scope ⊇ required_scopes\n  ✓ aud  (on by default)\n  ✗ HS256 forgery → 401",
+      "originalText": "⑤  VERIFY — offline, per request\n  ✓ signature · JWKS · RS* only\n  ✓ iss · exp · type = access\n  ✓ scope ⊇ required_scopes\n  ✓ aud  (on by default)\n  ✗ HS256 forgery → 401",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#34d399", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
@@ -749,8 +749,8 @@
     {
       "type": "text", "id": "c_replay_note",
       "x": 296, "y": 1296, "width": 230, "height": 54,
-      "text": "bearer is forwarded\nUNCHANGED → keep\nrequire_audience ON",
-      "originalText": "bearer is forwarded\nUNCHANGED → keep\nrequire_audience ON",
+      "text": "bearer is forwarded\nUNCHANGED → keep\naud enforcement ON",
+      "originalText": "bearer is forwarded\nUNCHANGED → keep\naud enforcement ON",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",

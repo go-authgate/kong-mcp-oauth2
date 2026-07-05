@@ -10,8 +10,9 @@
 //	    — serve Protected Resource Metadata (RFC 9728): which AuthGate to use,
 //	      which scopes, how to present the token.
 //	(5) verify the RS256 access token against AuthGate's JWKS
-//	    (signature + iss + exp + type, plus scope when required_scopes is set and
-//	    aud only when require_audience is on), then forward upstream to the MCP server.
+//	    (signature + iss + exp + type + aud, plus scope when required_scopes is
+//	    set; aud binding per RFC 8707, relaxable only via skip_audience_check),
+//	    then forward upstream to the MCP server.
 //
 // Kong never runs the OAuth flow. The MCP client drives Auth Code + PKCE against
 // AuthGate itself; Kong only advertises the entry point and validates what comes
@@ -43,7 +44,7 @@ import (
 )
 
 var (
-	Version  = "0.4.0"
+	Version  = "0.5.0"
 	Priority = 1000
 )
 

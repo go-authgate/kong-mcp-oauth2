@@ -71,7 +71,7 @@ sequenceDiagram
     A-->>C: RS256 access token
     K-)A: fetch JWKS (cached / auto-rotated)
     C->>K: GET /mcp/server + Bearer ‹jwt›
-    Note over K: ⑤ verify sig(JWKS) + exp (+ iss unless skip_issuer_check)<br/>+ type=access (unless skip_type_check) + scope (+ aud when require_audience)
+    Note over K: ⑤ verify sig(JWKS) + exp (+ iss unless skip_issuer_check)<br/>+ type=access (unless skip_type_check) + scope<br/>+ aud (unless skip_audience_check)
     K->>M: forward + X-MCP-Subject / X-MCP-Scope
     M-->>K: 200
     K-->>C: 200
@@ -82,7 +82,7 @@ sequenceDiagram
 | ②    | Kong → client     | Request with no/invalid token → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                                                                                                                |
 | ③    | Kong → client     | Client fetches `<PRM URL>` → plugin serves Protected Resource Metadata (which AuthGate, which scopes)                                                                                                                                                           |
 | —    | client ↔ AuthGate | Client discovers AuthGate from the metadata and runs **Auth Code + PKCE** to get an access token                                                                                                                                                                |
-| ⑤    | Kong              | Client retries with `Authorization: Bearer <jwt>` → plugin verifies **sig (JWKS) + exp** (+ **iss** unless `skip_issuer_check`) (+ **`type=access`** unless `skip_type_check`) **+ scope** (and **aud** only when `require_audience` is on) → forwards upstream |
+| ⑤    | Kong              | Client retries with `Authorization: Bearer <jwt>` → plugin verifies **sig (JWKS) + exp** (+ **iss** unless `skip_issuer_check`) (+ **`type=access`** unless `skip_type_check`) **+ scope** (+ **aud** unless `skip_audience_check`) → forwards upstream |
 
 ## Why RS256 + JWKS (not HS256)
 
@@ -112,11 +112,11 @@ One plugin instance per MCP resource. See `kong.yml` for full examples.
 | `jwks_uri`           |          | AuthGate JWKS endpoint (RS256). Accepted algs are always pinned to the RS family. Leave empty to **auto-discover** it from the issuer's AS metadata (RFC 8414 `/.well-known/oauth-authorization-server`, falling back to OIDC discovery; cached 1h, the metadata's `issuer` must match). Set it explicitly when Kong reaches AuthGate on a different host than clients do — e.g. `host.docker.internal` in the compose demos.                                                                                                                                              |
 | `required_scopes`    |          | All listed scopes must be present in the token's `scope`, else `403 insufficient_scope`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `audience`           |          | Expected `aud` for **token validation only**. Defaults to `gateway_origin + resource_path`. The PRM `resource` always stays the canonical URL (RFC 9728 §3.3), so set this only when AuthGate emits a fixed non-URL `aud`.                                                                                                                                                                                                                                                                                                                                                 |
-| `require_audience`   |          | Enforce `aud` only when `true`. **All shipped configs enable it** (the schema default is `false` only because go-pdk booleans default to false). AuthGate emits a per-resource `aud` via RFC 8707: the client sends `resource=<gateway_origin + resource_path>` on the token request, and that URL must be on the client's `allowed_resources` allowlist. The expected value is an exact, scheme/slash-sensitive match — a token minted without the matching `aud` gets `401`. Set `false` only temporarily while debugging token issuance (see the replay warning below). |
 | `leeway_seconds`     |          | Clock-skew tolerance for `exp`/`nbf`. Recommend `60`. Must be ≥ 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `skip_issuer_check`  |          | ⚠️ Default `false`. When `true`, the token's `iss` claim is **not** validated against `issuer`. The `issuer` field is still required (it is used for AS metadata discovery and the PRM response). Use only when the token issuer is known to omit the `iss` claim.                                                                                                                                                                                                                                                                                                          |
 | `skip_type_check`    |          | ⚠️ Default `false`. When `true`, the `type=access` guard is skipped — refresh tokens and tokens without a `type` claim are accepted as bearer credentials. Use only when the authorization server does not set a `type` claim.                                                                                                                                                                                                                                                                                                                                              |
 | `skip_control_chars` |          | ⚠️ Default `false`. When `true`, the CR/LF injection guard on forwarded claims (`X-MCP-*` headers) is disabled. Use only temporarily while debugging with non-standard tokens.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `skip_audience_check` |          | ⚠️ Default `false`: `aud` is **enforced by default** (RFC 8707 / MCP spec — the resource server MUST verify the token was issued for it). AuthGate emits a per-resource `aud`: the client sends `resource=<gateway_origin + resource_path>` on the token request, and that URL must be on the client's `allowed_resources` allowlist. The expected value is an exact, scheme/slash-sensitive match — a token minted without a matching `aud` (or with no `aud` at all) gets `401`. Set `true` only when the token issuer cannot emit a per-resource `aud` (e.g. the Gitea demo route) or temporarily while debugging token issuance (see the replay warning below).          |
 | `debug_claims`       |          | ⚠️ Default `false`. When `true`, dumps the full decoded claim set to Kong's debug log for every request the plugin decodes — an operator aid for finding which claim carries the scope/`aud`/`type` behind an unexpected `401`/`403`. Gated by config, **not** by log level alone (`kong.Log.Debug` ships to Kong on every call regardless of `log_level`), so it stays off until you opt in. Enable it together with `KONG_LOG_LEVEL=debug` to actually see the output. Claims may contain PII, so turn it on deliberately and briefly.                                          |
 
 Only tokens with `type=access` are accepted; AuthGate refresh tokens (same key,
@@ -133,15 +133,28 @@ authorization server is known not to emit a `type` claim.
 > hand the client's step ③ lookup to and the plugin never serves the metadata.
 > See the `paths:` lists in `kong.yml`.
 >
-> **Cross-resource replay warning (if you disable `require_audience`).** With
-> `require_audience: false`, `aud` is **not** checked, so the only thing
+> **Cross-resource replay warning (if you set `skip_audience_check: true`).**
+> With the check skipped, `aud` is **not** validated, so the only thing
 > distinguishing one MCP resource from another is `scope`. A token minted with
 > multiple scopes (e.g. `mcp:gitea mcp:sentry`) is accepted at **every**
 > resource whose scope it carries, and because the raw bearer is forwarded
 > upstream unchanged, a backend that receives it can replay it against a
-> sibling resource. This is why every shipped config enables `require_audience`;
-> if you turn it off to debug token issuance, turn it back on before treating
-> resources as isolated.
+> sibling resource. This is why the check is on by default; if you skip it to
+> debug token issuance, remove the flag before treating resources as isolated.
+>
+> **Migrating from ≤ 0.4.x (`require_audience` removed).** `aud` enforcement is
+> now the default, and the old opt-in field is gone: a declarative config that
+> still contains `require_audience` is **rejected by Kong's schema validation at
+> load time** (a deliberate loud failure, not a silent behavior change).
+>
+> - `require_audience: true` → delete the line (the default now covers it).
+> - `require_audience: false` → replace with `skip_audience_check: true` —
+>   but first check whether your tokens can simply be minted with the right
+>   `aud` (RFC 8707 `resource` parameter, see the preflight section below).
+>
+> If tokens without a matching `aud` start getting `401` after the upgrade, the
+> `rejected token` line in Kong's log names the audience mismatch, and
+> `skip_audience_check: true` is the temporary escape hatch.
 
 ## 1. Build the plugin
 
@@ -184,8 +197,8 @@ After `docker compose up`, exercise the handshake. Replace `$GW` with
 > Rows 1–2 work against the stub demo as shipped. Rows 3–5b need real tokens:
 > point `issuer` / `jwks_uri` in `kong.yml` at an AuthGate first (with the
 > placeholder config they fail with `503 temporarily_unavailable`, since
-> `auth.example.com` has no JWKS to fetch). Because the shipped configs enforce
-> `aud`, the tokens for rows 3–5a must be bound to the resource — request them
+> `auth.example.com` has no JWKS to fetch). Because `aud` is enforced by
+> default, the tokens for rows 3–5a must be bound to the resource — request them
 > with `resource=<gateway_origin + resource_path>` (RFC 8707). Row 5c is the exception — an HS256
 > forgery is rejected with `401 invalid_token` _before_ any JWKS fetch (the alg
 > is pinned first), so it returns `401` even against the placeholder config.
@@ -197,7 +210,7 @@ After `docker compose up`, exercise the handshake. Replace `$GW` with
 | 3   | Valid token → forwarded      | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | `200` from the MCP upstream                                       |
 | 4   | Expired token                | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                               |
 | 5a  | Missing scope                | token without `required_scopes` → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                          |
-| 5b  | **Cross-audience**           | token issued for a different resource, with `require_audience: true`                     | `401 invalid_token` (aud mismatch)                                |
+| 5b  | **Cross-audience**           | token issued for a different resource (aud enforced by default)                          | `401 invalid_token` (aud mismatch)                                |
 | 5c  | **HS256 forgery (key bits)** | forge an HS256 token using the RSA public key as the HMAC secret                         | `401 invalid_token` — **must be rejected** (alg confusion)        |
 
 Rows **5b** and **5c** are the security-critical ones — run them before going
@@ -216,7 +229,7 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
    tokens** (not only `id_token`) to asymmetric signing.
 3. **Issuer matches.** The token's `iss` equals the plugin's `issuer` config,
    byte-for-byte (mind the trailing slash).
-4. **`aud` binds to the resource.** The shipped configs enforce `aud`, so every
+4. **`aud` binds to the resource.** `aud` is enforced by default, so every
    token must be requested with RFC 8707 resource binding: add
    `<gateway_origin + resource_path>` (e.g. `https://gw.example.com/mcp/server`)
    to the OAuth client's `allowed_resources` in AuthGate (an empty allowlist is
@@ -259,6 +272,6 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
   `Token-Id` / `Expires`) but does **not** strip or exchange the `Authorization`
   header,
   so each MCP backend receives a live, replayable token. Trust your MCP backends
-  accordingly, and keep `require_audience` enabled (the shipped default in every
-  example config) so a backend can't reuse a token against a sibling resource —
-  it can still replay it against the _same_ resource until `exp`.
+  accordingly, and leave the default `aud` enforcement on (don't set
+  `skip_audience_check`) so a backend can't reuse a token against a sibling
+  resource — it can still replay it against the _same_ resource until `exp`.
