@@ -22,20 +22,20 @@ var rsMethods = []string{"RS256", "RS384", "RS512"}
 
 // Config is the plugin schema (one instance per MCP resource/service).
 type Config struct {
-	Issuer          string   `json:"issuer"`           // AuthGate base URL == token iss
-	GatewayOrigin   string   `json:"gateway_origin"`   // externally reachable Kong origin
-	ResourcePath    string   `json:"resource_path"`    // e.g. /mcp/server
-	Audience        string   `json:"audience"`         // expected aud; default GatewayOrigin+ResourcePath
-	RequiredScopes  []string `json:"required_scopes"`  // all must be present
-	JWKSURI         string   `json:"jwks_uri"`         // AuthGate JWKS endpoint (RS256); empty => discover via RFC 8414 from Issuer
-	RequireAudience bool     `json:"require_audience"` // false until AuthGate emits per-resource aud
-	LeewaySeconds   int      `json:"leeway_seconds"`   // clock-skew tolerance for exp/nbf
+	Issuer         string   `json:"issuer"`          // AuthGate base URL == token iss
+	GatewayOrigin  string   `json:"gateway_origin"`  // externally reachable Kong origin
+	ResourcePath   string   `json:"resource_path"`   // e.g. /mcp/server
+	Audience       string   `json:"audience"`        // expected aud; default GatewayOrigin+ResourcePath
+	RequiredScopes []string `json:"required_scopes"` // all must be present
+	JWKSURI        string   `json:"jwks_uri"`        // AuthGate JWKS endpoint (RS256); empty => discover via RFC 8414 from Issuer
+	LeewaySeconds  int      `json:"leeway_seconds"`  // clock-skew tolerance for exp/nbf
 
 	// Leniency toggles — disable only when the upstream token issuer is known
 	// to omit these fields or when temporarily debugging.
-	SkipIssuerCheck  bool `json:"skip_issuer_check"`  // accept tokens that lack/mismatch iss
-	SkipTypeCheck    bool `json:"skip_type_check"`    // accept tokens whose type != "access"
-	SkipControlChars bool `json:"skip_control_chars"` // skip CR/LF header-injection guard
+	SkipIssuerCheck   bool `json:"skip_issuer_check"`   // accept tokens that lack/mismatch iss
+	SkipTypeCheck     bool `json:"skip_type_check"`     // accept tokens whose type != "access"
+	SkipControlChars  bool `json:"skip_control_chars"`  // skip CR/LF header-injection guard
+	SkipAudienceCheck bool `json:"skip_audience_check"` // accept tokens that lack/mismatch aud (allows cross-resource replay)
 
 	// DebugClaims dumps the full decoded claim set to Kong's debug log for each
 	// request it decodes — an operator aid for seeing which claim carries the
@@ -142,7 +142,12 @@ func (conf *Config) setup() error {
 		if conf.LeewaySeconds > 0 {
 			opts = append(opts, jwt.WithLeeway(time.Duration(conf.LeewaySeconds)*time.Second))
 		}
-		if conf.RequireAudience {
+		// aud is enforced by default (RFC 8707 / MCP spec: the resource server
+		// MUST verify the token was issued for it). A token whose aud is missing
+		// or does not contain the expected value fails validation — golang-jwt
+		// treats an absent aud as ErrTokenRequiredClaimMissing once an expected
+		// audience is set (pinned by TestAudienceValidation).
+		if !conf.SkipAudienceCheck {
 			opts = append(opts, jwt.WithAudience(conf.audience()))
 		}
 		conf.parser = jwt.NewParser(opts...) // goroutine-safe, reused across requests

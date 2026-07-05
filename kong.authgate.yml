@@ -35,13 +35,13 @@ services:
           jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
           required_scopes:
             - mcp:gitea
-          # aud enforced: tokens must carry aud == http://localhost:8000/mcp/server.
+          # aud enforced by default: tokens must carry
+          # aud == http://localhost:8000/mcp/server.
           # Mint them with RFC 8707 resource binding (HANDS-ON.zh-TW.md §6 / §9):
           #   1) add http://localhost:8000/mcp/server to the client's
           #      allowed_resources in AuthGate (empty allowlist = deny-all), and
           #   2) send resource=http://localhost:8000/mcp/server on /oauth/token.
           # A token minted without it gets 401 invalid_token here.
-          require_audience: true
           leeway_seconds: 60
 
   # sentry route — demonstrates scope enforcement using `email`, a scope
@@ -64,8 +64,8 @@ services:
           jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
           required_scopes:
             - email
-          # same as gitea: bind via resource=http://localhost:8000/mcp/sentry
-          require_audience: true
+          # aud enforced by default — same as mcp-server: bind via
+          # resource=http://localhost:8000/mcp/sentry
           leeway_seconds: 60
 
   - name: mcp-gitea
@@ -89,8 +89,11 @@ services:
           # (below) to confirm which claims the token actually carries. If Gitea
           # later starts emitting a scope claim, add the scopes back to enforce.
           required_scopes: []
-          # same as gitea: bind via resource=http://localhost:8000/mcp/gitea
-          require_audience: false
+          # Gitea's tokens carry no per-resource aud, so the default aud check
+          # (aud == http://localhost:8000/mcp/gitea) would 401 every request.
+          # Skipped here like the other Gitea-shaped claims below — this demo
+          # route accepts any valid Gitea token, replayable across siblings.
+          skip_audience_check: true
           leeway_seconds: 60
           skip_issuer_check: true
           skip_type_check: true

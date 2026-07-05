@@ -34,19 +34,18 @@ services:
           jwks_uri: https://auth.example.com/.well-known/jwks.json
           required_scopes:
             - mcp:server
-          # aud is enforced (secure default): the access token's aud must equal
+          # aud is enforced by default: the access token's aud must equal
           # gateway_origin + resource_path. AuthGate binds it per resource via
           # RFC 8707 — the client sends resource=<that URL> on /oauth/token and
           # the URL must be on the client's allowed_resources allowlist.
-          # Set to false only temporarily while debugging token issuance;
-          # while off, tokens are replayable across sibling resources.
-          require_audience: true
           leeway_seconds: 60
           # Leniency toggles — all default to false (strict). Enable only when
           # the upstream token issuer is known to omit a field or for debugging.
-          # skip_issuer_check: true   # issuer still required for discovery/PRM
-          # skip_type_check: true     # accept tokens without type=access
-          # skip_control_chars: true  # disable CR/LF injection guard on headers
+          # skip_issuer_check: true    # issuer still required for discovery/PRM
+          # skip_type_check: true      # accept tokens without type=access
+          # skip_control_chars: true   # disable CR/LF injection guard on headers
+          # skip_audience_check: true  # accept any aud — tokens then replayable
+          #                            # across sibling resources; debugging only
 
   - name: mcp-sentry
     url: http://mcp-sentry:3000
@@ -63,10 +62,9 @@ services:
           gateway_origin: https://gw.example.com
           resource_path: /mcp/sentry
           # jwks_uri omitted on purpose: it is auto-discovered from the
-          # issuer's AS metadata (RFC 8414). See the gitea service above for
-          # the explicit form, and use that form whenever Kong reaches
+          # issuer's AS metadata (RFC 8414). See the mcp-server service above
+          # for the explicit form, and use that form whenever Kong reaches
           # AuthGate on a different host than clients do.
           required_scopes:
             - mcp:sentry
-          require_audience: true
           leeway_seconds: 60

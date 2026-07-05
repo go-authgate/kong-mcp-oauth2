@@ -130,8 +130,9 @@ AuthGate 端註冊並發給該 client。
 
 ## 6. ⚠️ aud：先把資源註冊進 client 的 `allowed_resources`
 
-`kong.authgate.yml` 兩條路由都開了 `require_audience: true`（出廠值），token 的
-`aud` 必須等於 `gateway_origin + resource_path`。AuthGate 用 **RFC 8707 resource
+plugin **預設即強制驗證 `aud`**（0.5.0 起；舊的 `require_audience` 欄位已移除，
+設定檔留著它會被 Kong schema 驗證拒絕），token 的 `aud` 必須等於
+`gateway_origin + resource_path`。AuthGate 用 **RFC 8707 resource
 binding** 發 per-resource `aud`：取 token 時帶 `resource=<該 URL>`，AuthGate 就把
 它寫進 `aud`。但有個前提——
 
@@ -146,9 +147,9 @@ binding** 發 per-resource `aud`：取 token 時帶 `resource=<該 URL>`，AuthG
 http://localhost:8000/mcp/server, http://localhost:8000/mcp/sentry
 ```
 
-> 除錯期間若想先排除 aud 因素，可把 `kong.authgate.yml` 的 `require_audience`
-> 暫時改回 `false`（改完要 `--force-recreate kong`）——**驗完記得改回來**，
-> 否則 token 可跨資源重放（見 README 的重放警告）。
+> 除錯期間若想先排除 aud 因素，可在 `kong.authgate.yml` 該路由加上
+> `skip_audience_check: true`（改完要 `--force-recreate kong`）——**驗完記得
+> 拿掉**，否則 token 可跨資源重放（見 README 的重放警告）。
 
 ---
 
@@ -295,7 +296,7 @@ WWW-Authenticate: Bearer resource_metadata="...", error="insufficient_scope", sc
 
 ### Row 5b — audience 不符 → 401（安全關鍵）
 
-兩條路由都開了 `require_audience: true`，各自預期 `aud` 等於
+兩條路由都採預設的 `aud` 強制驗證，各自預期 `aud` 等於
 `gateway_origin + resource_path`。這列直接示範它擋下的攻擊——**跨資源重放**：
 一顆綁定 gitea 的 token（第 Row 3 的 `$GOOD`），拿去打 sentry 一樣被擋：
 

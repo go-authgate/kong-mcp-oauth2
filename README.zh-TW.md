@@ -68,7 +68,7 @@ sequenceDiagram
     A-->>C: RS256 access token
     K-)A: 抓 JWKS（快取／自動輪替）
     C->>K: GET /mcp/server + Bearer ‹jwt›
-    Note over K: ⑤ 驗 簽章(JWKS) + iss + exp + type=access<br/>+ scope（aud 僅在 require_audience 時）
+    Note over K: ⑤ 驗 簽章(JWKS) + exp（iss 除非 skip_issuer_check）<br/>+ type=access（除非 skip_type_check）+ scope<br/>+ aud（除非 skip_audience_check）
     K->>M: 放行 + X-MCP-Subject / X-MCP-Scope
     M-->>K: 200
     K-->>C: 200
@@ -79,7 +79,7 @@ sequenceDiagram
 | ②    | Kong → client     | 沒帶 / 帶錯 token 的請求 → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                         |
 | ③    | Kong → client     | client 去抓 `<PRM URL>` → plugin 回傳 Protected Resource Metadata（要用哪個 AuthGate、要哪些 scope）                                                                |
 | —    | client ↔ AuthGate | client 從 metadata 找到 AuthGate，自己跑 **Auth Code + PKCE** 換 access token                                                                                       |
-| ⑤    | Kong              | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + iss + exp + `type=access` + scope**（**aud** 僅在 `require_audience` 開啟時驗）→ 放行往後送 |
+| ⑤    | Kong              | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + exp**（**iss** 除非 `skip_issuer_check`）（**`type=access`** 除非 `skip_type_check`）**+ scope**（**aud** 除非 `skip_audience_check`）→ 放行往後送 |
 
 ## 為什麼選 RS256 + JWKS（不是 HS256）
 
@@ -108,11 +108,11 @@ JWKS 的抓取、記憶體快取、背景輪替、未知 `kid` 的限流補抓�
 | `jwks_uri`         |      | AuthGate JWKS endpoint（RS256）。接受的演算法固定鎖在 RS 家族。留空則改由 issuer 的 AS metadata **自動發現**（RFC 8414 `/.well-known/oauth-authorization-server`，失敗時退回 OIDC discovery；快取 1 小時，metadata 的 `issuer` 必須與設定值相符）。當 Kong 連 AuthGate 的位址與 client 不同時（例如 compose 範例裡的 `host.docker.internal`）才需要手動指定。                                                                            |
 | `required_scopes`  |      | token 的 `scope` 必須包含全部所列項目，否則 `403 insufficient_scope`。                                                                                                                                                                                                                                                                                                                                                                   |
 | `audience`         |      | **只影響 token 的 `aud` 驗證**，預設為 `gateway_origin + resource_path`。PRM 的 `resource` 永遠維持 canonical URL（RFC 9728 §3.3），只有在 AuthGate 發固定的非 URL `aud` 時才需要設。                                                                                                                                                                                                                                                    |
-| `require_audience` |      | 設 `true` 才強制檢查 `aud`。**所有隨附設定檔都已開啟**（schema 預設為 `false` 只是因為 go-pdk 的布林零值）。AuthGate 透過 RFC 8707 發出 per-resource `aud`：client 在 token 請求帶 `resource=<gateway_origin + resource_path>`，且該 URL 必須在 client 的 `allowed_resources` 白名單內。比對值是逐字元、區分 scheme／斜線的精確比對——沒綁定相符 `aud` 的 token 一律 `401`。只有在除錯 token 簽發時才暫時設回 `false`（見下方重放警告）。 |
 | `leeway_seconds`   |      | `exp`/`nbf` 的時鐘偏移容忍秒數，建議 `60`。必須 ≥ 0。                                                                                                                                                                                                                                                                                                                                                                                    |
 | `skip_issuer_check`  |      | ⚠️ 預設 `false`。設 `true` 時**不**拿 token 的 `iss` claim 跟 `issuer` 比對。`issuer` 欄位仍為必填（用於 AS metadata 發現與 PRM 回應）。僅在已知 token 簽發者不帶 `iss` claim 時使用。                                                                                                                                                                                                                                          |
 | `skip_type_check`    |      | ⚠️ 預設 `false`。設 `true` 時略過 `type=access` 檢查——refresh token 與沒有 `type` claim 的 token 都會被當成 bearer 憑證接受。僅在已知授權伺服器不發 `type` claim 時使用。                                                                                                                                                                                                                                                      |
 | `skip_control_chars` |      | ⚠️ 預設 `false`。設 `true` 時停用對轉發 claims（`X-MCP-*` headers）的 CR/LF 注入防護。僅在以非標準 token 除錯時暫時使用。                                                                                                                                                                                                                                                                                                       |
+| `skip_audience_check` |      | ⚠️ 預設 `false`：`aud` **預設即強制驗證**（RFC 8707 / MCP 規範——資源伺服器 MUST 驗證 token 是簽發給自己的）。AuthGate 發出 per-resource `aud`：client 在 token 請求帶 `resource=<gateway_origin + resource_path>`，且該 URL 必須在 client 的 `allowed_resources` 白名單內。比對值是逐字元、區分 scheme／斜線的精確比對——沒綁定相符 `aud`（或完全沒有 `aud`）的 token 一律 `401`。僅在 token 簽發者無法發 per-resource `aud`（例如 Gitea demo route）或暫時除錯 token 簽發時才設 `true`（見下方重放警告）。 |
 | `debug_claims`       |      | ⚠️ 預設 `false`。設 `true` 時，對每個 plugin 解碼的請求把完整解碼後的 claim set 傾印到 Kong 的 debug log——方便維運人員找出非預期 `401`/`403` 背後是哪個 claim 帶著 scope／`aud`／`type`。由 config 控管，而**非**僅靠 log level（`kong.Log.Debug` 不分 `log_level` 每次呼叫都會送到 Kong），所以未主動開啟前一律關閉。需搭配 `KONG_LOG_LEVEL=debug` 才看得到輸出。claims 可能含 PII，請審慎且短暫開啟。                |
 
 只接受 `type=access` 的 token；AuthGate 的 refresh token（金鑰、`iss`、`aud`、
@@ -127,12 +127,24 @@ JWKS 的抓取、記憶體快取、背景輪替、未知 `kid` 的限流補抓�
 > Kong 沒有對應 route 可交給 plugin，plugin 就不會回傳 metadata。請看 `kong.yml`
 > 裡每條 route 的 `paths:` 清單。
 >
-> **跨資源重放警告（若你關掉 `require_audience`）。** 在 `require_audience: false`
-> 下不會檢查 `aud`，所以區分不同 MCP 資源的只剩 `scope`。一顆帶多個 scope 的 token
+> **跨資源重放警告（若你設了 `skip_audience_check: true`）。** 略過檢查時不會驗
+> `aud`，所以區分不同 MCP 資源的只剩 `scope`。一顆帶多個 scope 的 token
 > （例如 `mcp:gitea mcp:sentry`）會在**每個**它帶有對應 scope 的資源上都被接受；
 > 又因為原始 bearer 會原封不動往後送，收到它的後端可以拿去重放到另一個資源。
-> 這正是所有隨附設定檔都開啟 `require_audience` 的原因；若為了除錯 token 簽發而
-> 暫時關掉，把資源視為彼此隔離之前務必改回來。
+> 這正是此檢查預設開啟的原因；若為了除錯 token 簽發而暫時略過，把資源視為彼此
+> 隔離之前務必把開關拿掉。
+>
+> **從 ≤ 0.4.x 遷移（`require_audience` 已移除）。** `aud` 驗證現在是預設行為，
+> 舊的 opt-in 欄位已刪除：declarative config 裡若還留著 `require_audience`，
+> **Kong 載入時會被 schema 驗證直接拒絕**（刻意的大聲失敗，不做靜默的行為改變）。
+>
+> - `require_audience: true` → 刪掉該行（新預設已涵蓋）。
+> - `require_audience: false` → 改成 `skip_audience_check: true`——但請先確認
+>   token 是否其實可以用正確的 `aud` 簽發（RFC 8707 `resource` 參數，見下方
+>   動手前確認）。
+>
+> 升級後若沒綁相符 `aud` 的 token 開始收到 `401`，Kong log 的 `rejected token`
+> 行會寫明 audience 不符；`skip_audience_check: true` 是暫時的逃生口。
 
 ## 1. 編譯 plugin
 
@@ -172,8 +184,8 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 
 > 第 1–2 列用內建的 stub demo 就能跑。第 3–5b 列需要真的 token：先把 `kong.yml`
 > 的 `issuer` / `jwks_uri` 指向 AuthGate（用預設的 placeholder 設定會回
-> `503 temporarily_unavailable`，因為 `auth.example.com` 抓不到 JWKS）。隨附設定
-> 都強制檢查 `aud`，所以第 3–5a 列的 token 必須綁定資源——取 token 時帶
+> `503 temporarily_unavailable`，因為 `auth.example.com` 抓不到 JWKS）。`aud`
+> 預設即強制檢查，所以第 3–5a 列的 token 必須綁定資源——取 token 時帶
 > `resource=<gateway_origin + resource_path>`（RFC 8707）。第 5c 列是
 > 例外——HS256 偽造會在抓 JWKS **之前** 就先被擋（演算法先被鎖定），回
 > `401 invalid_token`，所以即使用 placeholder 設定也是 `401`。
@@ -185,7 +197,7 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 | 3   | 有效 token → 放行          | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | MCP upstream 回 `200`                                           |
 | 4   | 過期 token                 | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                             |
 | 5a  | 缺少 scope                 | 沒有 `required_scopes` 的 token → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                        |
-| 5b  | **跨 audience**            | 為另一個資源簽發的 token，且 `require_audience: true`                                   | `401 invalid_token`（aud 不符）                                 |
+| 5b  | **跨 audience**            | 為另一個資源簽發的 token（aud 預設即強制驗證）                                          | `401 invalid_token`（aud 不符）                                 |
 | 5c  | **HS256 偽造（金鑰位元）** | 拿 RSA 公鑰當 HMAC 金鑰偽造一顆 HS256 token                                             | `401 invalid_token` — **必須被擋**（alg confusion）             |
 
 第 **5b** 與 **5c** 列是安全關鍵——上線前務必跑過。
@@ -202,7 +214,7 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
    `JWT_SECRET`（HS256）——請確認你們真的已經把 **access token**（不只 `id_token`）
    切到非對稱簽。
 3. **iss 一致。** token 的 `iss` 與 plugin 設定的 `issuer` 逐字元相符（注意結尾斜線）。
-4. **`aud` 綁定資源。** 隨附設定都強制檢查 `aud`，所以每顆 token 都要用 RFC 8707
+4. **`aud` 綁定資源。** `aud` 預設即強制檢查，所以每顆 token 都要用 RFC 8707
    resource binding 取得：先在 AuthGate 把 `<gateway_origin + resource_path>`
    （例如 `https://gw.example.com/mcp/server`）加進該 OAuth client 的
    `allowed_resources`（空白名單 = 全拒，token endpoint 會回 `invalid_target`），
@@ -232,6 +244,6 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 - **bearer token 會原封不動往後送。** Kong 會加上 `X-MCP-*` 身分 header（`Subject`
   / `Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` / `Expires`），
   但**不會**移除或換掉 `Authorization` header，所以每個 MCP 後端都會拿到一顆可重放的
-  有效 token。請據此信任你的 MCP 後端，並維持 `require_audience` 開啟（所有範例
-  設定的出廠值），讓後端無法拿 token 去重放到另一個資源——但對**同一個**資源仍可
-  重放到 `exp` 為止。
+  有效 token。請據此信任你的 MCP 後端，並維持預設的 `aud` 驗證（不要設
+  `skip_audience_check`），讓後端無法拿 token 去重放到另一個資源——但對
+  **同一個**資源仍可重放到 `exp` 為止。
