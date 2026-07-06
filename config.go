@@ -22,12 +22,12 @@ var rsMethods = []string{"RS256", "RS384", "RS512"}
 
 // Config is the plugin schema (one instance per MCP resource/service).
 type Config struct {
-	Issuer         string   `json:"issuer"`          // AuthGate base URL == token iss
+	Issuer         string   `json:"issuer"`          // Signet base URL == token iss
 	GatewayOrigin  string   `json:"gateway_origin"`  // externally reachable Kong origin
 	ResourcePath   string   `json:"resource_path"`   // e.g. /mcp/server
 	Audience       string   `json:"audience"`        // expected aud; default GatewayOrigin+ResourcePath
 	RequiredScopes []string `json:"required_scopes"` // all must be present
-	JWKSURI        string   `json:"jwks_uri"`        // AuthGate JWKS endpoint (RS256); empty => discover via RFC 8414 from Issuer
+	JWKSURI        string   `json:"jwks_uri"`        // Signet JWKS endpoint (RS256); empty => discover via RFC 8414 from Issuer
 	LeewaySeconds  int      `json:"leeway_seconds"`  // clock-skew tolerance for exp/nbf
 
 	// Leniency toggles — disable only when the upstream token issuer is known

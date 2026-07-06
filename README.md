@@ -1,4 +1,4 @@
-# kong-mcp-oauth2 — Unified MCP OAuth front door (Kong + AuthGate)
+# kong-mcp-oauth2 — Unified MCP OAuth front door (Kong + Signet)
 
 [![Docker Image](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/docker.yml/badge.svg)](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/docker.yml)
 [![Trivy Security Scan](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/security.yml/badge.svg)](https://github.com/go-authgate/kong-mcp-oauth2/actions/workflows/security.yml)
@@ -9,13 +9,13 @@
 
 > 繁體中文版本請見 [README.zh-TW.md](README.zh-TW.md)
 >
-> Hands-on macOS walkthrough against a real AuthGate: [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md) (繁體中文)
+> Hands-on macOS walkthrough against a real Signet: [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md) (繁體中文)
 
 `mcp-oauth2` is a Kong [go-pdk](https://github.com/Kong/go-pdk) plugin — built
 following Kong's [Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)
 guide — that puts **one OAuth front door in front of every MCP server**. Internal MCP services already sit
 behind [Kong](https://github.com/Kong/kong); this plugin makes them stop
-accepting hand-written PATs and instead require an AuthGate-issued OAuth access
+accepting hand-written PATs and instead require a [Signet](https://github.com/go-signet)-issued OAuth access
 token — validated locally with **RS256 + JWKS**, then forwarded to the MCP
 backend.
 
@@ -25,7 +25,7 @@ backend.
 
 The diagram above walks the whole handshake end to end: **A · Discovery** (Kong
 advertises the flow — steps ② ③), **B · OAuth** (the client drives Auth Code +
-PKCE against AuthGate while Kong fetches the JWKS), and **C · Verified access**
+PKCE against Signet while Kong fetches the JWKS), and **C · Verified access**
 (Kong verifies the RS256 token offline at step ⑤, then forwards upstream with
 `X-MCP-Subject` / `X-MCP-Scope`). Editable source:
 [`architecture.excalidraw`](architecture.excalidraw) — open it at
@@ -36,7 +36,7 @@ below are the lightweight, GitHub-rendered version of the same flow.
 graph LR
     client["MCP client<br/>(runs PKCE itself)"]
     kong["Kong<br/>+ mcp-oauth2 plugin"]
-    authgate["AuthGate<br/>Authorization Server"]
+    authgate["Signet<br/>Authorization Server"]
     mcp["MCP server(s)<br/>gitea / sentry"]
 
     client <-->|"MCP requests<br/>+ 401 challenge / PRM"| kong
@@ -47,7 +47,7 @@ graph LR
 
 **Kong does not run the OAuth flow.** It only _advertises where the flow is_
 (steps ②③) and _verifies the token that comes back_ (step ⑤). The MCP client
-runs Auth Code + PKCE against AuthGate by itself. One plugin config covers all MCP
+runs Auth Code + PKCE against Signet by itself. One plugin config covers all MCP
 servers — attach it to each service with a different `resource_path`.
 
 ## The handshake
@@ -60,7 +60,7 @@ Protected Resource Metadata and RFC 6750 bearer tokens). The numbers map to the
 sequenceDiagram
     participant C as MCP client
     participant K as Kong + mcp-oauth2
-    participant A as AuthGate
+    participant A as Signet
     participant M as MCP server
 
     C->>K: GET /mcp/server (no token)
@@ -80,16 +80,16 @@ sequenceDiagram
 | Step | Who               | What happens                                                                                                                                                                                                                                                    |
 | ---- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ②    | Kong → client     | Request with no/invalid token → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                                                                                                                |
-| ③    | Kong → client     | Client fetches `<PRM URL>` → plugin serves Protected Resource Metadata (which AuthGate, which scopes)                                                                                                                                                           |
-| —    | client ↔ AuthGate | Client discovers AuthGate from the metadata and runs **Auth Code + PKCE** to get an access token                                                                                                                                                                |
+| ③    | Kong → client     | Client fetches `<PRM URL>` → plugin serves Protected Resource Metadata (which Signet, which scopes)                                                                                                                                                           |
+| —    | client ↔ Signet | Client discovers Signet from the metadata and runs **Auth Code + PKCE** to get an access token                                                                                                                                                                |
 | ⑤    | Kong              | Client retries with `Authorization: Bearer <jwt>` → plugin verifies **sig (JWKS) + exp** (+ **iss** unless `skip_issuer_check`) (+ **`type=access`** unless `skip_type_check`) **+ scope** (+ **aud** unless `skip_audience_check`) → forwards upstream |
 
 ## Why RS256 + JWKS (not HS256)
 
 - **No shared secret on the gateway.** With HS256 the gateway would have to hold
-  AuthGate's signing secret — putting a forge-anything key on the edge. With
+  Signet's signing secret — putting a forge-anything key on the edge. With
   RS256 + JWKS, Kong only ever sees the **public** key.
-- **Zero-touch key rotation.** Rotate keys in AuthGate's JWKS; Kong picks them up
+- **Zero-touch key rotation.** Rotate keys in Signet's JWKS; Kong picks them up
   automatically (keyfunc background refresh). No Kong config change.
 - **Alg-confusion is blocked.** The plugin pins accepted algorithms to
   `RS256/RS384/RS512` and refuses `HS*`. This defeats the classic
@@ -106,20 +106,20 @@ One plugin instance per MCP resource. See `kong.yml` for full examples.
 
 | Field                | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `issuer`             | ✅        | AuthGate base URL. Must equal the token's `iss` claim byte-for-byte (unless `skip_issuer_check` is set).                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `issuer`             | ✅        | Signet base URL. Must equal the token's `iss` claim byte-for-byte (unless `skip_issuer_check` is set).                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `gateway_origin`     | ✅        | Externally reachable Kong origin, e.g. `https://gw.example.com`. Used to build the PRM URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `resource_path`      | ✅        | This resource's path, e.g. `/mcp/server`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `jwks_uri`           |          | AuthGate JWKS endpoint (RS256). Accepted algs are always pinned to the RS family. Leave empty to **auto-discover** it from the issuer's AS metadata (RFC 8414 `/.well-known/oauth-authorization-server`, falling back to OIDC discovery; cached 1h, the metadata's `issuer` must match). Set it explicitly when Kong reaches AuthGate on a different host than clients do — e.g. `host.docker.internal` in the compose demos.                                                                                                                                              |
+| `jwks_uri`           |          | Signet JWKS endpoint (RS256). Accepted algs are always pinned to the RS family. Leave empty to **auto-discover** it from the issuer's AS metadata (RFC 8414 `/.well-known/oauth-authorization-server`, falling back to OIDC discovery; cached 1h, the metadata's `issuer` must match). Set it explicitly when Kong reaches Signet on a different host than clients do — e.g. `host.docker.internal` in the compose demos.                                                                                                                                              |
 | `required_scopes`    |          | All listed scopes must be present in the token's `scope`, else `403 insufficient_scope`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `audience`           |          | Expected `aud` for **token validation only**. Defaults to `gateway_origin + resource_path`. The PRM `resource` always stays the canonical URL (RFC 9728 §3.3), so set this only when AuthGate emits a fixed non-URL `aud`.                                                                                                                                                                                                                                                                                                                                                 |
+| `audience`           |          | Expected `aud` for **token validation only**. Defaults to `gateway_origin + resource_path`. The PRM `resource` always stays the canonical URL (RFC 9728 §3.3), so set this only when Signet emits a fixed non-URL `aud`.                                                                                                                                                                                                                                                                                                                                                 |
 | `leeway_seconds`     |          | Clock-skew tolerance for `exp`/`nbf`. Recommend `60`. Must be ≥ 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `skip_issuer_check`  |          | ⚠️ Default `false`. When `true`, the token's `iss` claim is **not** validated against `issuer`. The `issuer` field is still required (it is used for AS metadata discovery and the PRM response). Use only when the token issuer is known to omit the `iss` claim.                                                                                                                                                                                                                                                                                                          |
 | `skip_type_check`    |          | ⚠️ Default `false`. When `true`, the `type=access` guard is skipped — refresh tokens and tokens without a `type` claim are accepted as bearer credentials. Use only when the authorization server does not set a `type` claim.                                                                                                                                                                                                                                                                                                                                              |
 | `skip_control_chars` |          | ⚠️ Default `false`. When `true`, the CR/LF injection guard on forwarded claims (`X-MCP-*` headers) is disabled. Use only temporarily while debugging with non-standard tokens.                                                                                                                                                                                                                                                                                                                                                                                              |
-| `skip_audience_check` |          | ⚠️ Default `false`: `aud` is **enforced by default** (RFC 8707 / MCP spec — the resource server MUST verify the token was issued for it). AuthGate emits a per-resource `aud`: the client sends `resource=<gateway_origin + resource_path>` on the token request, and that URL must be on the client's `allowed_resources` allowlist. The expected value is an exact, scheme/slash-sensitive match — a token minted without a matching `aud` (or with no `aud` at all) gets `401`. Set `true` only when the token issuer cannot emit a per-resource `aud` (e.g. the Gitea demo route) or temporarily while debugging token issuance (see the replay warning below).          |
+| `skip_audience_check` |          | ⚠️ Default `false`: `aud` is **enforced by default** (RFC 8707 / MCP spec — the resource server MUST verify the token was issued for it). Signet emits a per-resource `aud`: the client sends `resource=<gateway_origin + resource_path>` on the token request, and that URL must be on the client's `allowed_resources` allowlist. The expected value is an exact, scheme/slash-sensitive match — a token minted without a matching `aud` (or with no `aud` at all) gets `401`. Set `true` only when the token issuer cannot emit a per-resource `aud` (e.g. the Gitea demo route) or temporarily while debugging token issuance (see the replay warning below).          |
 | `debug_claims`       |          | ⚠️ Default `false`. When `true`, dumps the full decoded claim set to Kong's debug log for every request the plugin decodes — an operator aid for finding which claim carries the scope/`aud`/`type` behind an unexpected `401`/`403`. Gated by config, **not** by log level alone (`kong.Log.Debug` ships to Kong on every call regardless of `log_level`), so it stays off until you opt in. Enable it together with `KONG_LOG_LEVEL=debug` to actually see the output. Claims may contain PII, so turn it on deliberately and briefly.                                          |
 
-Only tokens with `type=access` are accepted; AuthGate refresh tokens (same key,
+Only tokens with `type=access` are accepted; Signet refresh tokens (same key,
 `iss`, `aud`, and `scope`, differing only by `type` and a longer `exp`) are
 rejected with `401 invalid_token`. Set `skip_type_check: true` only when the
 authorization server is known not to emit a `type` claim.
@@ -187,7 +187,7 @@ docker compose up --build
 This starts DB-less Kong (proxy on `:8000`; the unauthenticated admin API is
 bound to container-loopback and not published — see `docker-compose.yml`) with
 two stub MCP upstreams. Edit `kong.yml` so `issuer` / `gateway_origin` /
-`jwks_uri` point at your real AuthGate before expecting tokens to validate.
+`jwks_uri` point at your real Signet before expecting tokens to validate.
 
 ## 4. Validation matrix
 
@@ -195,7 +195,7 @@ After `docker compose up`, exercise the handshake. Replace `$GW` with
 `http://localhost:8000` for the demo (or your `gateway_origin`).
 
 > Rows 1–2 work against the stub demo as shipped. Rows 3–5b need real tokens:
-> point `issuer` / `jwks_uri` in `kong.yml` at an AuthGate first (with the
+> point `issuer` / `jwks_uri` in `kong.yml` at a Signet first (with the
 > placeholder config they fail with `503 temporarily_unavailable`, since
 > `auth.example.com` has no JWKS to fetch). Because `aud` is enforced by
 > default, the tokens for rows 3–5a must be bound to the resource — request them
@@ -216,15 +216,15 @@ After `docker compose up`, exercise the handshake. Replace `$GW` with
 Rows **5b** and **5c** are the security-critical ones — run them before going
 live.
 
-## AuthGate-side preflight
+## Signet-side preflight
 
-Before this works end-to-end, confirm three things on AuthGate (decode a real
+Before this works end-to-end, confirm three things on Signet (decode a real
 **access token**, not just the `id_token`):
 
 1. **JWKS resolves.** `GET <issuer>/.well-known/openid-configuration` → its
    `jwks_uri` returns a non-empty `keys` array.
 2. **Access tokens are RS256.** Decode an actual access token; its header `alg`
-   is `RS256` (not `HS256`) and its `kid` matches a key in the JWKS. AuthGate's
+   is `RS256` (not `HS256`) and its `kid` matches a key in the JWKS. Signet's
    default is often `JWT_SECRET` (HS256) — make sure you've moved **access
    tokens** (not only `id_token`) to asymmetric signing.
 3. **Issuer matches.** The token's `iss` equals the plugin's `issuer` config,
@@ -232,7 +232,7 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
 4. **`aud` binds to the resource.** `aud` is enforced by default, so every
    token must be requested with RFC 8707 resource binding: add
    `<gateway_origin + resource_path>` (e.g. `https://gw.example.com/mcp/server`)
-   to the OAuth client's `allowed_resources` in AuthGate (an empty allowlist is
+   to the OAuth client's `allowed_resources` in Signet (an empty allowlist is
    deny-all and the token endpoint answers `invalid_target`), then send
    `resource=<that URL>` on the token request. Decode the token and confirm
    `aud` equals the plugin's expected value exactly.
@@ -254,7 +254,7 @@ Before this works end-to-end, confirm three things on AuthGate (decode a real
   token requests get `503 temporarily_unavailable` (not `401`, so clients don't
   re-run OAuth) and it is retried on the next request — a failed initial fetch is
   never cached. Fetch waits are capped at 10s and run under a per-URI lock, so a
-  slow AuthGate can't stall traffic for other resources. Caveat: once keys are
+  slow Signet can't stall traffic for other resources. Caveat: once keys are
   cached, a token whose `kid` is unknown returns `401 invalid_token` (offline
   validation can't tell "key rotated in mid-outage" from "forged kid"), and an
   hourly refresh that pulls a JWKS containing one malformed key can drop the

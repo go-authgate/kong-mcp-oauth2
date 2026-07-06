@@ -44,7 +44,7 @@ type metaEntry struct {
 
 // metadataURLs returns the discovery documents to try for issuer, in order:
 // RFC 8414 (well-known inserted between host and path) first, then OIDC
-// discovery (well-known appended) — AuthGate serves both, other ASes at least
+// discovery (well-known appended) — Signet serves both, other ASes at least
 // one.
 func metadataURLs(issuer string) []string {
 	u, err := url.Parse(issuer)

@@ -193,11 +193,11 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	}
 	jti, _ := claims["jti"].(string)
 
-	// reject anything that is not an access token: AuthGate signs refresh
+	// reject anything that is not an access token: Signet signs refresh
 	// tokens with the same key, iss, aud, and scope — only the "type" claim and
 	// a longer exp differ — so without this check a leaked refresh token would
 	// be accepted as a bearer credential, defeating the short access-token TTL.
-	// Mirrors AuthGate's own resource-server validation.
+	// Mirrors Signet's own resource-server validation.
 	if t, _ := claims["type"].(string); t != "access" && !conf.SkipTypeCheck {
 		_ = kong.Log.Info("rejected non-access token; type=", t)
 		challenge(401, conf.bearerMeta+`, error="invalid_token"`,
@@ -227,7 +227,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 
 	// every value here is forwarded as an upstream header (and scope also feeds
 	// the check below); a control char (CR/LF) could split a header or smuggle a
-	// scope token (strings.Fields would swallow it). A real AuthGate token never
+	// scope token (strings.Fields would swallow it). A real Signet token never
 	// carries one, so reject rather than forward. (X-MCP-Expires is rendered from
 	// a number, so the guard over it is a harmless no-op.)
 	if !conf.SkipControlChars {
