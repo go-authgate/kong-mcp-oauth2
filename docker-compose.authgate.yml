@@ -1,4 +1,4 @@
-# DB-less Kong wired to a real AuthGate on the host at http://localhost:8080
+# DB-less Kong wired to a real Signet on the host at http://localhost:8080
 # (via kong.authgate.yml). Instead of building the plugin inside Docker (see
 # docker-compose.yml / Dockerfile), it mounts a locally cross-compiled binary
 # into the stock kong:3.9 image — handy when a TLS-intercepting proxy blocks the
@@ -37,7 +37,7 @@ services:
       KONG_PLUGINSERVER_MCP_OAUTH2_START_CMD: "/usr/local/bin/mcp-oauth2"
       KONG_PLUGINSERVER_MCP_OAUTH2_QUERY_CMD: "/usr/local/bin/mcp-oauth2 -dump"
     extra_hosts:
-      # Lets the plugin reach AuthGate running on the macOS host at
+      # Lets the plugin reach Signet running on the macOS host at
       # host.docker.internal:8080 (jwks_uri in kong.authgate.yml).
       - "host.docker.internal:host-gateway"
     volumes:

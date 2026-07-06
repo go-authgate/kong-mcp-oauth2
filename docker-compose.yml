@@ -4,7 +4,7 @@
 #
 # Then exercise the handshake against http://localhost:8000 (see README §4).
 # Point `issuer` / `gateway_origin` / `jwks_uri` in kong.yml at your real
-# AuthGate before expecting tokens to validate.
+# Signet before expecting tokens to validate.
 services:
   kong:
     build: .

@@ -13,13 +13,13 @@ import (
 )
 
 // jwksHTTPTimeout caps every JWKS fetch and unknown-kid refetch wait; the
-// library default of one minute would let a slow AuthGate stall requests.
+// library default of one minute would let a slow Signet stall requests.
 const jwksHTTPTimeout = 10 * time.Second
 
 // JWKS cache: the plugin server is long-lived, so one self-refreshing keyfunc
 // per JWKS URI is shared across the whole process. Construction performs a
 // synchronous initial HTTP fetch (up to jwksHTTPTimeout); it runs under a
-// per-URI lock, never a process-global one, so a slow or unreachable AuthGate
+// per-URI lock, never a process-global one, so a slow or unreachable Signet
 // stalls only the first cold caller for that URI — not warm requests, and not
 // requests for a different URI.
 var (

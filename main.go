@@ -1,5 +1,5 @@
 // Package main: Kong (go-pdk) plugin — unified MCP OAuth front door (steps 2/3/5)
-// in front of any number of MCP servers, backed by AuthGate and verifying tokens
+// in front of any number of MCP servers, backed by Signet and verifying tokens
 // with RS256 + JWKS.
 //
 // The MCP authorization handshake (2025-06 spec, building on RFC 9728 / RFC 6750):
@@ -7,16 +7,16 @@
 //	(2) 401 + WWW-Authenticate: Bearer resource_metadata="<PRM URL>"
 //	    — tell an unauthenticated client *where the flow lives*, not how to run it.
 //	(3) GET /.well-known/oauth-protected-resource/<resource>
-//	    — serve Protected Resource Metadata (RFC 9728): which AuthGate to use,
+//	    — serve Protected Resource Metadata (RFC 9728): which Signet to use,
 //	      which scopes, how to present the token.
-//	(5) verify the RS256 access token against AuthGate's JWKS
+//	(5) verify the RS256 access token against Signet's JWKS
 //	    (signature + exp always; iss, type=access, and aud — the RFC 8707
 //	    binding — each enforced unless the matching skip_* toggle relaxes it,
 //	    plus scope when required_scopes is set), then forward upstream to the
 //	    MCP server.
 //
 // Kong never runs the OAuth flow. The MCP client drives Auth Code + PKCE against
-// AuthGate itself; Kong only advertises the entry point and validates what comes
+// Signet itself; Kong only advertises the entry point and validates what comes
 // back. One plugin config protects one MCP resource; attach it to as many
 // services as you have MCP servers.
 //
@@ -26,7 +26,7 @@
 // are handled by MicahParks/keyfunc + jwkset, configured to fail fast: a failed
 // initial fetch surfaces as 503 instead of being cached as an empty key set
 // (once keys are cached, an unknown kid is a 401 — see Access), and the fetch
-// runs under a per-URI lock so a slow AuthGate cannot stall the whole gateway.
+// runs under a per-URI lock so a slow Signet cannot stall the whole gateway.
 //
 // The implementation is split across files within this package:
 //

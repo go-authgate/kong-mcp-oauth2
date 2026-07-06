@@ -2,7 +2,7 @@
 #
 # The same plugin protects every MCP service; only `resource_path`,
 # `required_scopes`, and the upstream `url` change. Swap the example.com
-# hosts for your AuthGate and gateway origins before loading.
+# hosts for your Signet and gateway origins before loading.
 #
 # IMPORTANT: each route must ALSO match its Protected Resource Metadata path
 # (/.well-known/oauth-protected-resource + resource_path), otherwise Kong has
@@ -29,13 +29,13 @@ services:
           resource_path: /mcp/server
           # Optional: omit to auto-discover from the issuer's AS metadata
           # (RFC 8414). Spelled out here because the demo issuer is a
-          # placeholder; keep it explicit whenever Kong reaches AuthGate on a
+          # placeholder; keep it explicit whenever Kong reaches Signet on a
           # different host than clients do (see kong.authgate.yml).
           jwks_uri: https://auth.example.com/.well-known/jwks.json
           required_scopes:
             - mcp:server
           # aud is enforced by default: the access token's aud must equal
-          # gateway_origin + resource_path. AuthGate binds it per resource via
+          # gateway_origin + resource_path. Signet binds it per resource via
           # RFC 8707 — the client sends resource=<that URL> on /oauth/token and
           # the URL must be on the client's allowed_resources allowlist.
           leeway_seconds: 60
@@ -64,7 +64,7 @@ services:
           # jwks_uri omitted on purpose: it is auto-discovered from the
           # issuer's AS metadata (RFC 8414). See the mcp-server service above
           # for the explicit form, and use that form whenever Kong reaches
-          # AuthGate on a different host than clients do.
+          # Signet on a different host than clients do.
           required_scopes:
             - mcp:sentry
           leeway_seconds: 60
