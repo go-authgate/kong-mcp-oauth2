@@ -35,8 +35,16 @@ services:
       KONG_PLUGINSERVER_NAMES: "mcp-oauth2"
       KONG_PLUGINSERVER_MCP_OAUTH2_START_CMD: "/usr/local/bin/mcp-oauth2"
       KONG_PLUGINSERVER_MCP_OAUTH2_QUERY_CMD: "/usr/local/bin/mcp-oauth2 -dump"
+    # Lets the container reach a Signet running on the host (jwks_uri
+    # http://host.docker.internal:8080 in kong.ngrok.local.yml). colima and
+    # plain dockerd don't provide host.docker.internal by default — this maps
+    # it explicitly; harmless when unused (the default kong.yml ignores it).
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
-      - ./kong.yml:/kong/kong.yml:ro
+      # Default is the placeholder kong.yml; the ngrok demo (NGROK.zh-TW.md)
+      # overrides it via .env with KONG_CONFIG=./kong.ngrok.local.yml.
+      - ${KONG_CONFIG:-./kong.yml}:/kong/kong.yml:ro
 
   # Real MCP servers: each echoes Kong's trusted X-MCP-Subject / X-MCP-Scope
   # headers back through a `whoami` tool. Same image backs both routes; only the

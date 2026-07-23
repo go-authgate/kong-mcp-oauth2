@@ -1,0 +1,78 @@
+# Kong DB-less config for the ngrok public demo (NGROK.zh-TW.md).
+#
+# TEMPLATE — do not load this file directly. Substitute the two placeholders
+# first (NGROK.zh-TW.md §4), then point KONG_CONFIG at the result in .env:
+#
+#   sed -e "s/KONG_NGROK_DOMAIN/<Kong 的網域>.ngrok-free.app/g" \
+#       -e "s/SIGNET_NGROK_DOMAIN/<Signet 的網域>.ngrok-free.app/g" \
+#       kong.ngrok.yml > kong.ngrok.local.yml
+#
+# Topology: TWO ngrok tunnels from one host agent —
+#   https://KONG_NGROK_DOMAIN   -> localhost:8000  (Kong proxy, this config)
+#   https://SIGNET_NGROK_DOMAIN -> localhost:8080  (your Signet on the host)
+#
+# The localhost-vs-container split (same gotcha as kong.authgate.yml):
+#   - issuer:  string-compared byte-for-byte with the token's `iss`, which
+#     Signet derives from BASE_URL — so it is Signet's PUBLIC ngrok URL.
+#   - jwks_uri: fetched BY KONG (inside the container) — go straight to the
+#     host Signet via host.docker.internal instead of hairpinning out through
+#     the public ngrok edge (slower, burns free-tier bandwidth, and the ngrok
+#     browser interstitial never applies to it).
+#   - gateway_origin: Kong's PUBLIC ngrok URL — used to build the PRM
+#     `resource` and the expected token `aud`.
+#
+# IMPORTANT: each route must ALSO match its Protected Resource Metadata path
+# (/.well-known/oauth-protected-resource + resource_path), otherwise Kong has
+# no route to hand the client's PRM lookup to and the plugin never runs.
+_format_version: "3.0"
+
+services:
+  - name: mcp-server
+    url: http://mcp-server:3000
+    routes:
+      - name: mcp-server
+        paths:
+          - /mcp/server
+          - /.well-known/oauth-protected-resource/mcp/server
+        strip_path: true
+    plugins:
+      - name: mcp-oauth2
+        config:
+          issuer: https://SIGNET_NGROK_DOMAIN
+          gateway_origin: https://KONG_NGROK_DOMAIN
+          resource_path: /mcp/server
+          jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
+          # Register mcp:server on the Signet OAuth client first
+          # (NGROK.zh-TW.md §6) — requiring a scope Signet never issues is a
+          # guaranteed 403 insufficient_scope.
+          required_scopes:
+            - mcp:server
+          # aud is enforced by default: the token's aud must equal
+          # gateway_origin + resource_path. Mint tokens with RFC 8707 resource
+          # binding — resource=https://KONG_NGROK_DOMAIN/mcp/server — after
+          # adding that URL to the client's allowed_resources in Signet
+          # (empty allowlist = deny-all → 400 invalid_target).
+          leeway_seconds: 60
+
+  - name: mcp-sentry
+    url: http://mcp-sentry:3000
+    routes:
+      - name: mcp-sentry
+        paths:
+          - /mcp/sentry
+          - /.well-known/oauth-protected-resource/mcp/sentry
+        strip_path: true
+    plugins:
+      - name: mcp-oauth2
+        config:
+          issuer: https://SIGNET_NGROK_DOMAIN
+          gateway_origin: https://KONG_NGROK_DOMAIN
+          resource_path: /mcp/sentry
+          jwks_uri: http://host.docker.internal:8080/.well-known/jwks.json
+          required_scopes:
+            - mcp:sentry
+          # Same aud rule as mcp-server — bind with
+          # resource=https://KONG_NGROK_DOMAIN/mcp/sentry. A token bound to
+          # /mcp/server replayed here gets 401 invalid_token (the demo's
+          # cross-resource-replay row).
+          leeway_seconds: 60

@@ -10,6 +10,8 @@
 > English version: [README.md](README.md)
 >
 > 接真 Signet 的 macOS 實機操作手冊請見 [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md)。
+>
+> 用 ngrok 把示範環境開上公網、給遠端 MCP client（MCP Inspector、claude.ai）連線：[NGROK.zh-TW.md](NGROK.zh-TW.md)。
 
 `mcp-oauth2` 是一個 Kong [go-pdk](https://github.com/Kong/go-pdk) plugin（依
 Kong 官方[Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)

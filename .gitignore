@@ -35,6 +35,10 @@ go.work.sum
 # env file
 .env
 
+# ngrok public demo — sed-rendered Kong config carrying your real ngrok
+# domains (generated per NGROK.zh-TW.md §4)
+/kong.ngrok.local.yml
+
 # Editor/IDE
 # .idea/
 # .vscode/
