@@ -10,6 +10,8 @@
 > 繁體中文版本請見 [README.zh-TW.md](README.zh-TW.md)
 >
 > Hands-on macOS walkthrough against a real Signet: [HANDS-ON.zh-TW.md](HANDS-ON.zh-TW.md) (繁體中文)
+>
+> Expose the demo publicly over ngrok for remote MCP clients (MCP Inspector, claude.ai): [NGROK.zh-TW.md](NGROK.zh-TW.md) (繁體中文)
 
 `mcp-oauth2` is a Kong [go-pdk](https://github.com/Kong/go-pdk) plugin — built
 following Kong's [Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)
