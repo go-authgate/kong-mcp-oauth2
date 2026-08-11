@@ -171,6 +171,30 @@ func TestWhoami_FullIdentity(t *testing.T) {
 	}
 }
 
+// Test 1c: token_forwarded reports whether an Authorization header reached the
+// backend — the signal validation row 6a reads to prove the gateway's
+// strip/static mode actually withheld the client token. Only presence is
+// echoed, never the value.
+func TestWhoami_TokenForwarded(t *testing.T) {
+	ts := httptest.NewServer(newHandler())
+	defer ts.Close()
+
+	// gateway in passthrough mode: the bearer token reaches the backend
+	out := callWhoami(t, ts, map[string]string{
+		"X-MCP-Subject": "alice",
+		"Authorization": "Bearer live-token",
+	})
+	if !out.TokenForwarded {
+		t.Error("token_forwarded = false with Authorization present, want true")
+	}
+
+	// gateway in strip/static mode: no Authorization header arrives
+	out = callWhoami(t, ts, map[string]string{"X-MCP-Subject": "alice"})
+	if out.TokenForwarded {
+		t.Error("token_forwarded = true without Authorization, want false")
+	}
+}
+
 // Test 2: edge — headers absent yield empty strings, no panic, server stays up.
 func TestWhoami_HeadersAbsent(t *testing.T) {
 	ts := httptest.NewServer(newHandler())

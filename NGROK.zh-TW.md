@@ -290,7 +290,10 @@ curl -s $GW/mcp/server -X POST \
 ```
 
 預期（`structuredContent` 節錄；`subject` 是 token 的 `sub`，
-client_credentials 的 `sub` 以 `client:` 開頭）：
+client_credentials 的 `sub` 以 `client:` 開頭。`token_forwarded: false`
+是預設 `upstream_auth_mode: strip` 的證明——bearer token 在 Kong 驗完就被
+移除,後端只拿到 `X-MCP-*` 身分 header,公開 demo 不會把活 token 再暴露
+一次）：
 
 ```json
 {
@@ -298,7 +301,8 @@ client_credentials 的 `sub` 以 `client:` 開頭）：
   "issuer": "https://SIGNET_NGROK_DOMAIN",
   "scope": "mcp:server",
   "server": "mcp-server",
-  "subject": "<token 的 sub>"
+  "subject": "<token 的 sub>",
+  "token_forwarded": false
 }
 ```
 

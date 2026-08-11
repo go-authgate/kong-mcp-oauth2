@@ -42,6 +42,12 @@ type Output struct {
 	Client   string   `json:"client,omitempty" jsonschema:"the OAuth client the token was issued to (client_id/azp)"`
 	TokenID  string   `json:"token_id,omitempty" jsonschema:"the token's unique id (token jti)"`
 	Expires  string   `json:"expires,omitempty" jsonschema:"when the access token expires, RFC 3339 (token exp)"`
+	// TokenForwarded is deliberately not omitempty: false is the interesting
+	// answer — it proves the gateway withheld the client's bearer token
+	// (upstream_auth_mode strip/static), which is what validation row 6a checks.
+	// Only presence is reported, never the credential itself, so a demo output
+	// can't leak a live token into logs or screenshots.
+	TokenForwarded bool `json:"token_forwarded" jsonschema:"whether an Authorization header reached this backend; false means the gateway stripped or replaced the client token"`
 }
 
 // whoami reads the trusted identity headers off the inbound HTTP request that
@@ -62,16 +68,17 @@ func whoami(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallT
 	// Go's HTTP server moves Host out of the header map into req.Host, which the
 	// SDK doesn't expose here, so Get("Host") would always be empty.
 	return nil, Output{
-		Subject:  h.Get("X-MCP-Subject"),
-		Scope:    scope,
-		Scopes:   strings.Fields(scope),
-		Server:   serverName(),
-		Host:     h.Get("X-Forwarded-Host"),
-		Issuer:   h.Get("X-MCP-Issuer"),
-		Audience: h.Get("X-MCP-Audience"),
-		Client:   h.Get("X-MCP-Client"),
-		TokenID:  h.Get("X-MCP-Token-Id"),
-		Expires:  h.Get("X-MCP-Expires"),
+		Subject:        h.Get("X-MCP-Subject"),
+		Scope:          scope,
+		Scopes:         strings.Fields(scope),
+		Server:         serverName(),
+		Host:           h.Get("X-Forwarded-Host"),
+		Issuer:         h.Get("X-MCP-Issuer"),
+		Audience:       h.Get("X-MCP-Audience"),
+		Client:         h.Get("X-MCP-Client"),
+		TokenID:        h.Get("X-MCP-Token-Id"),
+		Expires:        h.Get("X-MCP-Expires"),
+		TokenForwarded: h.Get("Authorization") != "",
 	}, nil
 }
 

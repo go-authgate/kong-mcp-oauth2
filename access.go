@@ -68,6 +68,12 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
+	// one info line per plugin instance (not per request) so an operator can
+	// confirm from the logs which upstream auth behavior is live.
+	conf.modeLogOnce.Do(func() {
+		_ = kong.Log.Info("upstream auth mode: ", conf.upstreamMode)
+	})
+
 	path, err := kong.Request.GetPath()
 	if err != nil {
 		exitJSON(kong, 500, map[string]string{
@@ -213,9 +219,10 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		expStr = time.Unix(int64(exp), 0).UTC().Format(time.RFC3339)
 	}
 
-	// the identity surfaced to the MCP backend — one source of truth for both
-	// the control-char guard and the forwarding loop, so the two can never drift.
-	trusted := []struct{ name, value string }{
+	// the identity surfaced to the MCP backend — one source of truth for the
+	// control-char guard, the forwarding loop, and the namespace sweep's
+	// allowlist, so the three can never drift.
+	trusted := []headerKV{
 		{"X-MCP-Subject", sub},
 		{"X-MCP-Scope", scope},
 		{"X-MCP-Issuer", iss},
@@ -248,11 +255,33 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
+	// failUpstream: shared fail-closed exit for every header mutation below —
+	// proxying after an unconfirmed set/clear would forward client-supplied
+	// values on headers the backend is told to trust, or leak a credential a
+	// mode promised to remove.
+	failUpstream := func(what string, err error) {
+		_ = kong.Log.Err("failed to ", what, ": ", err.Error())
+		exitJSON(kong, 500, map[string]string{
+			"error":             "server_error",
+			"error_description": "cannot prepare upstream request",
+		}, nil)
+	}
+
+	// namespace sweep: the trusted loop below only touches the seven names it
+	// owns, so a client-sent X-MCP-Foo would otherwise reach the backend
+	// untouched — and X-MCP-* is exactly the namespace the backend is told to
+	// trust instead of the (possibly stripped) Authorization header, so no
+	// name in it may originate from the client.
+	for _, name := range unknownMCPHeaders(headers, trusted) {
+		if err := kong.ServiceRequest.ClearHeader(name); err != nil {
+			failUpstream("clear untrusted header "+name, err)
+			return
+		}
+	}
+
 	// surface identity to the MCP backend. SetHeader overrides any inbound copy,
 	// so a client can never smuggle its own values through the trusted headers;
-	// an absent claim instead clears the inbound copy. Fail closed: if a set/clear
-	// is not confirmed, proxying anyway would forward client-supplied values on
-	// headers the backend is told to trust.
+	// an absent claim instead clears the inbound copy.
 	for _, h := range trusted {
 		var err error
 		if h.value != "" {
@@ -261,13 +290,65 @@ func (conf *Config) Access(kong *pdk.PDK) {
 			err = kong.ServiceRequest.ClearHeader(h.name)
 		}
 		if err != nil {
-			_ = kong.Log.Err("failed to set trusted header ", h.name, ": ", err.Error())
-			exitJSON(kong, 500, map[string]string{
-				"error":             "server_error",
-				"error_description": "cannot set identity headers",
-			}, nil)
+			failUpstream("set trusted header "+h.name, err)
 			return
 		}
 	}
-	// fall through -> Kong forwards to upstream (Authorization preserved)
+
+	// upstream credential (upstream_auth_mode): only passthrough forwards the
+	// client's Authorization. Phrasing it as "clear unless passthrough" keeps
+	// withholding the credential the default action, so a mode that isn't
+	// explicitly passthrough (including an unrecognized one) can never fail open
+	// by forgetting to strip — and static then rides a possibly-different header,
+	// because keeping the original alongside would leak the token the mode exists
+	// to withhold.
+	if conf.upstreamMode != upstreamModePassthrough {
+		if err := kong.ServiceRequest.ClearHeader("Authorization"); err != nil {
+			failUpstream("strip Authorization header", err)
+			return
+		}
+	}
+	if conf.upstreamMode == upstreamModeStatic {
+		if err := kong.ServiceRequest.SetHeader(conf.upstreamHeader, conf.upstreamValue); err != nil {
+			failUpstream("set upstream credential header", err)
+			return
+		}
+	}
+
+	// extra headers apply in every mode: their use (tenancy/source tags) is
+	// orthogonal to the auth mode, and setup() already rejected reserved names.
+	// An empty value clears the header (mirrors the trusted loop) rather than
+	// forwarding a present-but-empty header the backend might read as set.
+	for _, h := range conf.extraHeaders {
+		var err error
+		if h.value != "" {
+			err = kong.ServiceRequest.SetHeader(h.name, h.value)
+		} else {
+			err = kong.ServiceRequest.ClearHeader(h.name)
+		}
+		if err != nil {
+			failUpstream("set extra header "+h.name, err)
+			return
+		}
+	}
+	// fall through -> Kong forwards to upstream (Authorization per upstream_auth_mode)
+}
+
+// unknownMCPHeaders returns, sorted for determinism, the names of client-sent
+// X-MCP-* headers (any case) that are not in the trusted set. These must be
+// cleared before forwarding: the backend trusts the whole namespace, not just
+// the names this plugin version happens to fill.
+func unknownMCPHeaders(headers map[string][]string, trusted []headerKV) []string {
+	var unknown []string
+	for name := range headers {
+		if !isMCPHeaderName(name) {
+			continue
+		}
+		if slices.ContainsFunc(trusted, func(h headerKV) bool { return strings.EqualFold(h.name, name) }) {
+			continue
+		}
+		unknown = append(unknown, name)
+	}
+	slices.Sort(unknown)
+	return unknown
 }

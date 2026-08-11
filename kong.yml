@@ -39,6 +39,19 @@ services:
           # RFC 8707 — the client sends resource=<that URL> on /oauth/token and
           # the URL must be on the client's allowed_resources allowlist.
           leeway_seconds: 60
+          # What the upstream receives in place of the client's bearer token.
+          # "strip" (the default, spelled out here) removes Authorization —
+          # the backend reads identity from the trusted X-MCP-* headers, so it
+          # never holds a live, replayable user credential. Alternatives:
+          #   passthrough — forward the client token unchanged (pre-0.6
+          #                 behavior; use only if the backend validates it)
+          #   static      — send a fixed upstream credential instead:
+          #                 upstream_auth_token (keep it out of committed
+          #                 files via Kong's ${{ env "..." }} substitution),
+          #                 optional upstream_auth_header (e.g. X-Api-Key;
+          #                 default Authorization with a "Bearer " prefix)
+          # upstream_extra_headers ("Name: value") apply in every mode.
+          upstream_auth_mode: strip
           # Leniency toggles — all default to false (strict). Enable only when
           # the upstream token issuer is known to omit a field or for debugging.
           # skip_issuer_check: true    # issuer still required for discovery/PRM
@@ -68,3 +81,6 @@ services:
           required_scopes:
             - mcp:sentry
           leeway_seconds: 60
+          # strip is already the default — spelled out for symmetry with the
+          # mcp-server service above, where the modes are documented.
+          upstream_auth_mode: strip

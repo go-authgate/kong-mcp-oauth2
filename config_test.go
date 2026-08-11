@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"maps"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,204 @@ func signToken(t *testing.T, issuer string, extra jwt.MapClaims) string {
 		t.Fatalf("sign token: %v", err)
 	}
 	return raw
+}
+
+// TestUpstreamAuthConfig pins setup()'s upstream_auth_* handling: the strip
+// default, enum enforcement, the static-mode required token, header-name and
+// control-char hygiene (unconditional — skip_control_chars must NOT relax
+// config validation), and the first-colon-only split of extra headers. Every
+// invalid combination must fail setup loudly; nothing may silently degrade to
+// a less safe mode.
+func TestUpstreamAuthConfig(t *testing.T) {
+	base := func(mutate func(*Config)) *Config {
+		conf := &Config{
+			Issuer:        "https://auth.example.com",
+			GatewayOrigin: "https://gw.example.com",
+			ResourcePath:  "/mcp/server",
+		}
+		if mutate != nil {
+			mutate(conf)
+		}
+		return conf
+	}
+
+	t.Run("default mode is strip", func(t *testing.T) {
+		conf := base(nil)
+		if err := conf.setup(); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if conf.upstreamMode != upstreamModeStrip {
+			t.Errorf("upstreamMode = %q, want %q", conf.upstreamMode, upstreamModeStrip)
+		}
+	})
+
+	t.Run("passthrough accepted as explicit opt-out", func(t *testing.T) {
+		conf := base(func(c *Config) { c.UpstreamAuthMode = "passthrough" })
+		if err := conf.setup(); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if conf.upstreamMode != upstreamModePassthrough {
+			t.Errorf("upstreamMode = %q, want %q", conf.upstreamMode, upstreamModePassthrough)
+		}
+	})
+
+	t.Run("static on default header gets Bearer prefix", func(t *testing.T) {
+		conf := base(func(c *Config) {
+			c.UpstreamAuthMode = "static"
+			c.UpstreamAuthToken = "s3cret"
+		})
+		if err := conf.setup(); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if conf.upstreamHeader != "Authorization" || conf.upstreamValue != "Bearer s3cret" {
+			t.Errorf("credential = %q: %q, want Authorization: Bearer s3cret", conf.upstreamHeader, conf.upstreamValue)
+		}
+	})
+
+	t.Run("static on custom header omits Bearer prefix", func(t *testing.T) {
+		conf := base(func(c *Config) {
+			c.UpstreamAuthMode = "static"
+			c.UpstreamAuthToken = "s3cret"
+			c.UpstreamAuthHeader = "X-Api-Key"
+		})
+		if err := conf.setup(); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if conf.upstreamHeader != "X-Api-Key" || conf.upstreamValue != "s3cret" {
+			t.Errorf("credential = %q: %q, want X-Api-Key: s3cret", conf.upstreamHeader, conf.upstreamValue)
+		}
+	})
+
+	t.Run("extra headers split at first colon only", func(t *testing.T) {
+		conf := base(func(c *Config) {
+			c.UpstreamExtraHeaders = []string{"X-Tenant: acme", "X-Callback:https://cb.example.com/hook"}
+		})
+		if err := conf.setup(); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		want := []headerKV{
+			{name: "X-Tenant", value: "acme"},
+			{name: "X-Callback", value: "https://cb.example.com/hook"},
+		}
+		if len(conf.extraHeaders) != len(want) {
+			t.Fatalf("extraHeaders = %v, want %v", conf.extraHeaders, want)
+		}
+		for i := range want {
+			if conf.extraHeaders[i] != want[i] {
+				t.Errorf("extraHeaders[%d] = %v, want %v", i, conf.extraHeaders[i], want[i])
+			}
+		}
+	})
+
+	rejected := []struct {
+		name    string
+		mutate  func(*Config)
+		wantSub string // substring the setup error must carry
+	}{
+		{
+			name:    "unknown mode",
+			mutate:  func(c *Config) { c.UpstreamAuthMode = "exchange" },
+			wantSub: "upstream_auth_mode",
+		},
+		{
+			name:    "static without token",
+			mutate:  func(c *Config) { c.UpstreamAuthMode = "static" },
+			wantSub: "upstream_auth_token is required",
+		},
+		{
+			name: "control chars in token rejected even with skip_control_chars",
+			mutate: func(c *Config) {
+				c.UpstreamAuthMode = "static"
+				c.UpstreamAuthToken = "s3c\r\nret"
+				c.SkipControlChars = true // gates token claims only, never config
+			},
+			wantSub: "upstream_auth_token must not contain control characters",
+		},
+		{
+			name: "invalid credential header name",
+			mutate: func(c *Config) {
+				c.UpstreamAuthMode = "static"
+				c.UpstreamAuthToken = "s3cret"
+				c.UpstreamAuthHeader = "X Api Key"
+			},
+			wantSub: "upstream_auth_header",
+		},
+		{
+			name:    "extra header without colon",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"X-Tenant"} },
+			wantSub: "upstream_extra_headers",
+		},
+		{
+			name:    "extra header must not set Authorization",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"Authorization: Bearer x"} },
+			wantSub: "reserved",
+		},
+		{
+			name:    "extra header must not set X-MCP-*",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"X-MCP-Subject: admin"} },
+			wantSub: "reserved",
+		},
+		{
+			name: "extra header must not shadow the static credential header",
+			mutate: func(c *Config) {
+				c.UpstreamAuthMode = "static"
+				c.UpstreamAuthToken = "s3cret"
+				c.UpstreamAuthHeader = "X-Api-Key"
+				c.UpstreamExtraHeaders = []string{"x-api-key: other"}
+			},
+			wantSub: "reserved",
+		},
+		{
+			name:    "control chars in extra header value",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"X-Tenant: ac\rme"} },
+			wantSub: "control characters",
+		},
+		{
+			// credential fields set without static mode are silently ignored
+			// at request time (a live token would leak under passthrough), so
+			// setup must reject the combination rather than degrade.
+			name: "credential fields require static mode",
+			mutate: func(c *Config) {
+				c.UpstreamAuthMode = "passthrough"
+				c.UpstreamAuthToken = "s3cret"
+			},
+			wantSub: `require upstream_auth_mode: "static"`,
+		},
+		{
+			// the static credential is applied after the trusted loop, so
+			// aiming it at an X-MCP-* header would overwrite verified identity.
+			name: "credential header must not be in X-MCP-* namespace",
+			mutate: func(c *Config) {
+				c.UpstreamAuthMode = "static"
+				c.UpstreamAuthToken = "s3cret"
+				c.UpstreamAuthHeader = "X-MCP-Subject"
+			},
+			wantSub: "X-MCP-*",
+		},
+		{
+			name:    "extra header must not set a framing/routing header",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"Host: internal.example.com"} },
+			wantSub: "reserved",
+		},
+		{
+			// underscore form folds onto the same key as X-MCP-Subject on
+			// CGI-style backends, so it is part of the reserved namespace.
+			name:    "extra header must not set X_MCP_ underscore variant",
+			mutate:  func(c *Config) { c.UpstreamExtraHeaders = []string{"X_MCP_Subject: admin"} },
+			wantSub: "reserved",
+		},
+	}
+	for _, tt := range rejected {
+		t.Run("rejects "+tt.name, func(t *testing.T) {
+			err := base(tt.mutate).setup()
+			if err == nil {
+				t.Fatal("expected setup to fail, got nil error")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not mention %q", err, tt.wantSub)
+			}
+		})
+	}
 }
 
 // TestAudienceValidation exercises setup()'s parser at the level a request
