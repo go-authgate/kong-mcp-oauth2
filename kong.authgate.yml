@@ -43,6 +43,10 @@ services:
           #   2) send resource=http://localhost:8000/mcp/server on /oauth/token.
           # A token minted without it gets 401 invalid_token here.
           leeway_seconds: 60
+          # strip (the default, spelled out): the echo backend reads identity
+          # from X-MCP-* and never needs the live token. `whoami` reports
+          # token_forwarded=false to prove it (validation row 6a).
+          upstream_auth_mode: strip
 
   # sentry route — demonstrates scope enforcement using `email`, a scope
   # Signet actually issues. A token requested with `--scope "email"` passes;
@@ -67,6 +71,7 @@ services:
           # aud enforced by default — same as mcp-server: bind via
           # resource=http://localhost:8000/mcp/sentry
           leeway_seconds: 60
+          upstream_auth_mode: strip
 
   - name: mcp-gitea
     url: http://host.docker.internal:8081/mcp
@@ -98,6 +103,12 @@ services:
           skip_issuer_check: true
           skip_type_check: true
           skip_control_chars: true
+          # passthrough is REQUIRED on this route: the upstream is Gitea's own
+          # /mcp endpoint, which authenticates the bearer token itself — the
+          # default strip would turn every proxied call into a Gitea 401.
+          # This is the documented upgrade order (README): make the backend
+          # trust X-MCP-* first, only then move off passthrough.
+          upstream_auth_mode: passthrough
           # dump decoded claims to the debug log (needs KONG_LOG_LEVEL=debug);
           # off by default elsewhere — enable only while diagnosing 401/403.
           debug_claims: true

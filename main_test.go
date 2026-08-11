@@ -8,6 +8,36 @@ import (
 	"testing"
 )
 
+// TestUnknownMCPHeaders pins the namespace sweep's selection: every client-sent
+// X-MCP-* name outside the trusted set must be flagged for clearing — case-
+// insensitively, since Kong lowercases inbound names — while trusted names and
+// unrelated headers are left to their own handling.
+func TestUnknownMCPHeaders(t *testing.T) {
+	trusted := []headerKV{
+		{"X-MCP-Subject", "alice"},
+		{"X-MCP-Scope", ""},
+	}
+	headers := map[string][]string{
+		"x-mcp-foo":     {"spoof"},          // unknown: swept
+		"X-MCP-Bar":     {"spoof"},          // unknown, original case: swept
+		"X_MCP_Sneaky":  {"spoof"},          // unknown underscore variant: swept (folds onto X-MCP-* on CGI backends)
+		"x-mcp-subject": {"admin"},          // trusted (case-insensitive): the SetHeader override owns it
+		"X-MCP-Scope":   {"mcp:everything"}, // trusted with empty claim: the ClearHeader path owns it
+		"Authorization": {"Bearer x"},       // outside the namespace: mode switch owns it
+		"X-Tenant":      {"acme"},           // unrelated: untouched
+	}
+	got := unknownMCPHeaders(headers, trusted)
+	want := []string{"X-MCP-Bar", "X_MCP_Sneaky", "x-mcp-foo"} // sorted for determinism ('-' < '_' < lowercase)
+	if len(got) != len(want) {
+		t.Fatalf("unknownMCPHeaders = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("unknownMCPHeaders[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestMetadataURLs(t *testing.T) {
 	tests := []struct {
 		issuer string

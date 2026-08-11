@@ -53,6 +53,9 @@ services:
           # adding that URL to the client's allowed_resources in Signet
           # (empty allowlist = deny-all → 400 invalid_target).
           leeway_seconds: 60
+          # strip (the default, spelled out): the echo backend reads identity
+          # from X-MCP-*; the public demo never re-exposes a live user token.
+          upstream_auth_mode: strip
 
   - name: mcp-sentry
     url: http://mcp-sentry:3000
@@ -76,3 +79,4 @@ services:
           # /mcp/server replayed here gets 401 invalid_token (the demo's
           # cross-resource-replay row).
           leeway_seconds: 60
+          upstream_auth_mode: strip

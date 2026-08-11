@@ -6,7 +6,10 @@ It answers one question for the demo gateway: **is the token's identity actually
 reaching my backend?**
 
 Kong verifies the bearer JWT, then forwards each request with a set of trusted
-headers derived from the token's claims (see the plugin's `main.go`):
+headers derived from the token's claims (see the plugin's `main.go`). Under the
+plugin's default `upstream_auth_mode: strip`, the client's `Authorization`
+header is removed before the request reaches this server, so identity travels
+only in these headers:
 
 - `X-MCP-Subject` — the token `sub`
 - `X-MCP-Scope` — the token `scope`
@@ -24,7 +27,10 @@ own) and exposes a single MCP tool over Streamable HTTP:
 
 - **`whoami`** — returns the forwarded identity read from the inbound request's
   `X-MCP-*` headers, plus this process's own `server` name. Absent headers yield
-  empty strings (omitted from the JSON for the optional fields):
+  empty strings (omitted from the JSON for the optional fields). `token_forwarded`
+  is always present (never omitted): it reports whether an `Authorization` header
+  reached this backend, so `false` is the proof that the gateway withheld the
+  client's token under the default `strip` mode:
 
   ```json
   {
@@ -37,7 +43,8 @@ own) and exposes a single MCP tool over Streamable HTTP:
     "audience": "http://localhost:8000/mcp/server",
     "client": "inspector",
     "token_id": "0b5e...",
-    "expires": "2026-06-17T12:34:56Z"
+    "expires": "2026-06-17T12:34:56Z",
+    "token_forwarded": false
   }
   ```
 

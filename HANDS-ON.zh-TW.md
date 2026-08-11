@@ -14,13 +14,13 @@
 
 ## 0. 前置需求
 
-| 工具                    | 確認指令                                                         | 備註                                                           |
-| ----------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
-| Go 1.25.10+             | `go version`                                                     | 編譯 plugin（`go.mod` 的 `go` 指令為 1.25.10）                 |
-| Docker                  | `docker version`                                                 | Docker Desktop、colima、OrbStack 皆可                          |
-| Docker Compose          | `docker compose version` 或 `docker-compose version`             | v2 即可。本機若只有獨立版 `docker-compose`，下面指令照用即可   |
-| curl / openssl          | 內建                                                             | 驗證用                                                         |
-| jq / python3            | 內建 / `brew install jq`                                         | 解析 token endpoint 回傳的 JSON、解碼 JWT claims               |
+| 工具                  | 確認指令                                                         | 備註                                                         |
+| --------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| Go 1.25.10+           | `go version`                                                     | 編譯 plugin（`go.mod` 的 `go` 指令為 1.25.10）               |
+| Docker                | `docker version`                                                 | Docker Desktop、colima、OrbStack 皆可                        |
+| Docker Compose        | `docker compose version` 或 `docker-compose version`             | v2 即可。本機若只有獨立版 `docker-compose`，下面指令照用即可 |
+| curl / openssl        | 內建                                                             | 驗證用                                                       |
+| jq / python3          | 內建 / `brew install jq`                                         | 解析 token endpoint 回傳的 JSON、解碼 JWT claims             |
 | **一個跑著的 Signet** | `curl -s http://localhost:8080/.well-known/openid-configuration` | 本手冊假設 Signet 跑在 macOS host 的 `http://localhost:8080` |
 
 > **colima 使用者**：先確認 daemon 起來了（`colima status`，沒有就 `colima start`）。
@@ -347,11 +347,15 @@ HTTP/1.1 401 Unauthorized
 
 ### 10a. 偽造身分 header 會被覆寫（trust-header smuggling）
 
-plugin 在轉發前會**先清掉** client 自帶的所有 `X-MCP-*` 身分 header（`Subject` /
-`Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` / `Expires`），再填入
-**token 裡驗證過的**對應 claim（`sub` / `scope` 一定有，其餘視 token 是否帶該 claim
-而定）。後端被告知「無條件信任這些 header」，所以這道清除是身分不被偽造的關鍵。下面
-以 `X-MCP-Subject` / `X-MCP-Scope` 示範，其餘 header 同理。
+plugin 在轉發前會**先清掉** client 自帶的所有 `X-MCP-*` header——不只七個已知
+名稱（`Subject` / `Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` /
+`Expires`），**整個 `X-MCP-` namespace 都會被掃過**，plugin 沒在設的名稱（例如
+`X-MCP-Foo`）也會被清掉——再填入 **token 裡驗證過的**對應 claim（`sub` /
+`scope` 一定有，其餘視 token 是否帶該 claim 而定）。後端被告知「無條件信任這些
+header」，所以這道清除是身分不被偽造的關鍵。同時,預設的
+`upstream_auth_mode: strip` 會移除 `Authorization`——echo 輸出裡看不到它,
+就是 README 驗證矩陣 6a 列要的證明。下面以 `X-MCP-Subject` / `X-MCP-Scope` /
+`X-MCP-Foo` 示範。
 
 stub 的 `http-echo` upstream 不會回放 header，要看到效果，臨時把 gitea upstream
 換成會回放 header 的 echo 服務：
@@ -367,19 +371,24 @@ sed -i '' 's#url: http://mcp-server:3000#url: http://mcp-echo:8080#' kong.authga
 docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong
 sleep 8
 
-# 3) 帶有效 token（Row 3 的 $GOOD），同時偽造 X-MCP-Subject / X-MCP-Scope
+# 3) 帶有效 token（Row 3 的 $GOOD），同時偽造已知與未知的 X-MCP-* header
 curl -s $GW/mcp/server \
   -H "Authorization: Bearer $GOOD" \
   -H "X-MCP-Subject: attacker@evil" \
   -H "X-MCP-Scope: admin:everything" \
-  | python3 -c "import sys,json; h=json.load(sys.stdin)['headers']; print('x-mcp-subject ->', h.get('x-mcp-subject')); print('x-mcp-scope   ->', h.get('x-mcp-scope'))"
+  -H "X-MCP-Foo: sneaky" \
+  | python3 -c "import sys,json; h=json.load(sys.stdin)['headers']; [print(f'{k:14}->', h.get(k)) for k in ('x-mcp-subject','x-mcp-scope','x-mcp-foo','authorization')]"
 ```
 
-預期——偽造值被丟棄，換成 token 裡的真實身分（`sub` / `scope` 視你的 Signet 而定）：
+預期——偽造值被丟棄,換成 token 裡的真實身分（`sub` / `scope` 視你的 Signet
+而定）;未知的 `X-MCP-Foo` 被 namespace sweep 清掉;`Authorization` 在預設
+`strip` 模式下不會到達上游（設 `upstream_auth_mode: passthrough` 時才會出現）：
 
 ```text
 x-mcp-subject -> <token 裡的 sub>
 x-mcp-scope   -> <token 裡的 scope>
+x-mcp-foo     -> None
+authorization -> None
 ```
 
 還原設定、清掉 echo 容器：
@@ -442,10 +451,10 @@ rm -f mcp-oauth2 mcp-oauth2-linux
 | 症狀                                                                                         | 原因 / 解法                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `docker compose up --build` 卡在 `go mod download` 的 x509 憑證錯誤                          | 公司網路 TLS 攔截，BuildKit 容器內缺企業根憑證。改走本手冊第 2+7 步的本機交叉編譯 + `docker-compose.authgate.yml`。                                                                                                                                                                                                                                                                                                         |
-| Row 3 一直 `503 temporarily_unavailable`                                                     | Kong 容器抓不到 `jwks_uri`。確認 Signet 在跑，且 `jwks_uri` 用 `host.docker.internal`（不是 `127.0.0.1` / `localhost`），且 compose 檔有 `extra_hosts: host.docker.internal:host-gateway`。用第 8 步的無帳密 probe 分辨連線問題。                                                                                                                                                                                         |
+| Row 3 一直 `503 temporarily_unavailable`                                                     | Kong 容器抓不到 `jwks_uri`。確認 Signet 在跑，且 `jwks_uri` 用 `host.docker.internal`（不是 `127.0.0.1` / `localhost`），且 compose 檔有 `extra_hosts: host.docker.internal:host-gateway`。用第 8 步的無帳密 probe 分辨連線問題。                                                                                                                                                                                           |
 | Row 3 變成 `401 invalid_token`                                                               | 兩個常見原因：① `issuer` 設定值與 token 的 `iss` 不一致（差一個結尾斜線也會錯）；② token 的 `aud` 與 `gateway_origin + resource_path` 不符——取 token 時沒帶 `resource=`（見第 6 步）。解碼 token 比對 `iss` 和 `aud`，要逐字元相同。                                                                                                                                                                                        |
-| token endpoint 回 `400 invalid_target`                                                       | 帶了 `resource=` 但該 URL 不在 client 的 `allowed_resources` 白名單（空白名單 = 全拒）。到 Signet 的 client 設定把資源 URL 加進 Allowed Resources。見第 6 步。                                                                                                                                                                                                                                                            |
-| 有效 token 卻 `403 insufficient_scope`                                                       | `required_scopes` 要求了 Signet 沒發的 scope（例如 `mcp:gitea`，但 Signet 只有 `openid profile email`）。改成 Signet 真的會發的 scope，或在 Signet 端註冊該 scope。見第 5 步。                                                                                                                                                                                                                                      |
+| token endpoint 回 `400 invalid_target`                                                       | 帶了 `resource=` 但該 URL 不在 client 的 `allowed_resources` 白名單（空白名單 = 全拒）。到 Signet 的 client 設定把資源 URL 加進 Allowed Resources。見第 6 步。                                                                                                                                                                                                                                                              |
+| 有效 token 卻 `403 insufficient_scope`                                                       | `required_scopes` 要求了 Signet 沒發的 scope（例如 `mcp:gitea`，但 Signet 只有 `openid profile email`）。改成 Signet 真的會發的 scope，或在 Signet 端註冊該 scope。見第 5 步。                                                                                                                                                                                                                                              |
 | `exec format error` / plugin 起不來                                                          | 交叉編譯的 `GOARCH` 跟 Docker VM 架構不符。Apple Silicon 用 `arm64`、Intel 用 `amd64`。                                                                                                                                                                                                                                                                                                                                     |
 | Kong 啟動就掛在 `failed decoding plugin info: Expected value but found T_END at character 1` | Kong 跑 `QUERY_CMD`（`mcp-oauth2 -dump`）拿到**空 stdout**。先驗 binary：`docker-compose -f docker-compose.authgate.yml run --rm --entrypoint /usr/local/bin/mcp-oauth2 kong -dump` 應印出 `{"Protocol":"ProtoBuf:1",...}`。空白 / `exec format error` = binary 與 kong 容器架構錯位（見上一列）。用對的 `GOARCH` 重新交叉編譯（見第 2 步）再 `docker-compose -f docker-compose.authgate.yml up -d --force-recreate kong`。 |
 | `docker compose` 說 unknown command                                                          | 你的環境只有獨立版 `docker-compose`。把指令裡的 `docker compose` 換成 `docker-compose` 即可（功能相同）。                                                                                                                                                                                                                                                                                                                   |
@@ -455,15 +464,15 @@ rm -f mcp-oauth2 mcp-oauth2-linux
 
 ## 附錄：驗證結果速查
 
-| #   | 測試                 | 指令重點                                                     | 預期                                     |
-| --- | -------------------- | ------------------------------------------------------------ | ---------------------------------------- |
-| 1   | 未認證挑戰           | `curl -si $GW/mcp/server`                                     | 401 + `WWW-Authenticate`                 |
-| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server` | JSON（resource / authorization_servers） |
-| 3   | 有效 token           | `Bearer $GOOD`（resource 綁定 + scope 都要對）               | 200，轉發 upstream                       |
-| 5a  | 缺 scope             | `Bearer $NOSCOPE`（aud 對、scope 錯）                        | 403 insufficient_scope                   |
-| 5b  | audience 不符 / 相符 | 綁 gitea 的 token 打 sentry / 綁對 aud                       | 401 / 200                                |
-| 5c  | HS256 偽造           | 手刻 HS256（免 token 來源）                                  | 401（alg confusion 被擋）                |
-| 10a | 偽造身分 header      | 同時帶 `X-MCP-Subject: attacker`                             | 被覆寫成 token 的 `sub`                  |
-| 10b | 重複 Authorization   | 兩個 `Authorization` header                                  | 400                                      |
-| 10c | 垃圾 token           | `Bearer not.a.jwt`                                           | 401                                      |
-| 8   | JWKS 連線 probe      | 手刻 RS256 垃圾簽章 token                                    | 401 = 連線 OK / 503 = JWKS 抓不到        |
+| #   | 測試                 | 指令重點                                                      | 預期                                                                        |
+| --- | -------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1   | 未認證挑戰           | `curl -si $GW/mcp/server`                                     | 401 + `WWW-Authenticate`                                                    |
+| 2   | PRM 文件             | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server` | JSON（resource / authorization_servers）                                    |
+| 3   | 有效 token           | `Bearer $GOOD`（resource 綁定 + scope 都要對）                | 200，轉發 upstream                                                          |
+| 5a  | 缺 scope             | `Bearer $NOSCOPE`（aud 對、scope 錯）                         | 403 insufficient_scope                                                      |
+| 5b  | audience 不符 / 相符 | 綁 gitea 的 token 打 sentry / 綁對 aud                        | 401 / 200                                                                   |
+| 5c  | HS256 偽造           | 手刻 HS256（免 token 來源）                                   | 401（alg confusion 被擋）                                                   |
+| 10a | 偽造身分 header      | 同時帶 `X-MCP-Subject: attacker` 與 `X-MCP-Foo`               | 覆寫成 token 的 `sub`;`X-MCP-Foo` 被清掉;`authorization` 不出現(預設 strip) |
+| 10b | 重複 Authorization   | 兩個 `Authorization` header                                   | 400                                                                         |
+| 10c | 垃圾 token           | `Bearer not.a.jwt`                                            | 401                                                                         |
+| 8   | JWKS 連線 probe      | 手刻 RS256 垃圾簽章 token                                     | 401 = 連線 OK / 503 = JWKS 抓不到                                           |

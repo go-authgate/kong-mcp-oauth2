@@ -18,7 +18,7 @@ Kong 官方[Develop Go plugins](https://developer.konghq.com/custom-plugins/go/)
 指南開發），在**所有 MCP server 前面架起單一的 OAuth 入口**。公司內部的 MCP 服務本來就掛在
 [Kong](https://github.com/Kong/kong) 後面；這個 plugin 讓它們不再接受各自手填的
 PAT，改成要求 [Signet](https://github.com/go-signet) 簽發的 OAuth access token——在本地用 **RS256 + JWKS**
-驗證後，再把 token 往後面的 MCP server 送。
+驗證後，把可信身分（`X-MCP-*` header）往後面的 MCP server 送（預設不再轉發 bearer token）。
 
 ## 架構總覽
 
@@ -76,12 +76,12 @@ sequenceDiagram
     K-->>C: 200
 ```
 
-| 步驟 | 由誰              | 發生什麼事                                                                                                                                                          |
-| ---- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ②    | Kong → client     | 沒帶 / 帶錯 token 的請求 → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                         |
-| ③    | Kong → client     | client 去抓 `<PRM URL>` → plugin 回傳 Protected Resource Metadata（要用哪個 Signet、要哪些 scope）                                                                |
-| —    | client ↔ Signet | client 從 metadata 找到 Signet，自己跑 **Auth Code + PKCE** 換 access token                                                                                       |
-| ⑤    | Kong              | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + exp**（**iss** 除非 `skip_issuer_check`）（**`type=access`** 除非 `skip_type_check`）**+ scope**（**aud** 除非 `skip_audience_check`）→ 放行往後送 |
+| 步驟 | 由誰            | 發生什麼事                                                                                                                                                                                                                 |
+| ---- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ②    | Kong → client   | 沒帶 / 帶錯 token 的請求 → `401` + `WWW-Authenticate: Bearer resource_metadata="<PRM URL>"`                                                                                                                                |
+| ③    | Kong → client   | client 去抓 `<PRM URL>` → plugin 回傳 Protected Resource Metadata（要用哪個 Signet、要哪些 scope）                                                                                                                         |
+| —    | client ↔ Signet | client 從 metadata 找到 Signet，自己跑 **Auth Code + PKCE** 換 access token                                                                                                                                                |
+| ⑤    | Kong            | client 帶 `Authorization: Bearer <jwt>` 重試 → plugin 驗 **簽章(JWKS) + exp**（**iss** 除非 `skip_issuer_check`）（**`type=access`** 除非 `skip_type_check`）**+ scope**（**aud** 除非 `skip_audience_check`）→ 放行往後送 |
 
 ## 為什麼選 RS256 + JWKS（不是 HS256）
 
@@ -102,20 +102,24 @@ JWKS 的抓取、記憶體快取、背景輪替、未知 `kid` 的限流補抓�
 
 每個 MCP 資源對應一個 plugin 實例。完整範例見 `kong.yml`。
 
-| 參數               | 必填 | 說明                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `issuer`           | ✅   | Signet base URL，必須與 token 的 `iss` claim 逐字元相符（除非設了 `skip_issuer_check`）。                                                                                                                                                                                                                                                                                                                                                                              |
-| `gateway_origin`   | ✅   | 對外可達的 Kong origin，例如 `https://gw.example.com`，用來組出 PRM URL。                                                                                                                                                                                                                                                                                                                                                                |
-| `resource_path`    | ✅   | 此資源的路徑，例如 `/mcp/server`。                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `jwks_uri`         |      | Signet JWKS endpoint（RS256）。接受的演算法固定鎖在 RS 家族。留空則改由 issuer 的 AS metadata **自動發現**（RFC 8414 `/.well-known/oauth-authorization-server`，失敗時退回 OIDC discovery；快取 1 小時，metadata 的 `issuer` 必須與設定值相符）。當 Kong 連 Signet 的位址與 client 不同時（例如 compose 範例裡的 `host.docker.internal`）才需要手動指定。                                                                            |
-| `required_scopes`  |      | token 的 `scope` 必須包含全部所列項目，否則 `403 insufficient_scope`。                                                                                                                                                                                                                                                                                                                                                                   |
-| `audience`         |      | **只影響 token 的 `aud` 驗證**，預設為 `gateway_origin + resource_path`。PRM 的 `resource` 永遠維持 canonical URL（RFC 9728 §3.3），只有在 Signet 發固定的非 URL `aud` 時才需要設。                                                                                                                                                                                                                                                    |
-| `leeway_seconds`   |      | `exp`/`nbf` 的時鐘偏移容忍秒數，建議 `60`。必須 ≥ 0。                                                                                                                                                                                                                                                                                                                                                                                    |
-| `skip_issuer_check`  |      | ⚠️ 預設 `false`。設 `true` 時**不**拿 token 的 `iss` claim 跟 `issuer` 比對。`issuer` 欄位仍為必填（用於 AS metadata 發現與 PRM 回應）。僅在已知 token 簽發者不帶 `iss` claim 時使用。                                                                                                                                                                                                                                          |
-| `skip_type_check`    |      | ⚠️ 預設 `false`。設 `true` 時略過 `type=access` 檢查——refresh token 與沒有 `type` claim 的 token 都會被當成 bearer 憑證接受。僅在已知授權伺服器不發 `type` claim 時使用。                                                                                                                                                                                                                                                      |
-| `skip_control_chars` |      | ⚠️ 預設 `false`。設 `true` 時停用對轉發 claims（`X-MCP-*` headers）的 CR/LF 注入防護。僅在以非標準 token 除錯時暫時使用。                                                                                                                                                                                                                                                                                                       |
-| `skip_audience_check` |      | ⚠️ 預設 `false`：`aud` **預設即強制驗證**（RFC 8707 / MCP 規範——資源伺服器 MUST 驗證 token 是簽發給自己的）。Signet 發出 per-resource `aud`：client 在 token 請求帶 `resource=<gateway_origin + resource_path>`，且該 URL 必須在 client 的 `allowed_resources` 白名單內。比對值是逐字元、區分 scheme／斜線的精確比對——沒綁定相符 `aud`（或完全沒有 `aud`）的 token 一律 `401`。僅在 token 簽發者無法發 per-resource `aud`（例如 Gitea demo route）或暫時除錯 token 簽發時才設 `true`（見下方重放警告）。 |
-| `debug_claims`       |      | ⚠️ 預設 `false`。設 `true` 時，對每個 plugin 解碼的請求把完整解碼後的 claim set 傾印到 Kong 的 debug log——方便維運人員找出非預期 `401`/`403` 背後是哪個 claim 帶著 scope／`aud`／`type`。由 config 控管，而**非**僅靠 log level（`kong.Log.Debug` 不分 `log_level` 每次呼叫都會送到 Kong），所以未主動開啟前一律關閉。需搭配 `KONG_LOG_LEVEL=debug` 才看得到輸出。claims 可能含 PII，請審慎且短暫開啟。                |
+| 參數                     | 必填 | 說明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issuer`                 | ✅   | Signet base URL，必須與 token 的 `iss` claim 逐字元相符（除非設了 `skip_issuer_check`）。                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `gateway_origin`         | ✅   | 對外可達的 Kong origin，例如 `https://gw.example.com`，用來組出 PRM URL。                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `resource_path`          | ✅   | 此資源的路徑，例如 `/mcp/server`。                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `jwks_uri`               |      | Signet JWKS endpoint（RS256）。接受的演算法固定鎖在 RS 家族。留空則改由 issuer 的 AS metadata **自動發現**（RFC 8414 `/.well-known/oauth-authorization-server`，失敗時退回 OIDC discovery；快取 1 小時，metadata 的 `issuer` 必須與設定值相符）。當 Kong 連 Signet 的位址與 client 不同時（例如 compose 範例裡的 `host.docker.internal`）才需要手動指定。                                                                                                                                                |
+| `required_scopes`        |      | token 的 `scope` 必須包含全部所列項目，否則 `403 insufficient_scope`。                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `audience`               |      | **只影響 token 的 `aud` 驗證**，預設為 `gateway_origin + resource_path`。PRM 的 `resource` 永遠維持 canonical URL（RFC 9728 §3.3），只有在 Signet 發固定的非 URL `aud` 時才需要設。                                                                                                                                                                                                                                                                                                                      |
+| `leeway_seconds`         |      | `exp`/`nbf` 的時鐘偏移容忍秒數，建議 `60`。必須 ≥ 0。                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `upstream_auth_mode`     |      | 後端收到什麼來取代 client 的 bearer token。**預設 `strip`**：驗證完後移除 `Authorization` header——身分只經由可信的 `X-MCP-*` header 傳遞，後端不再持有一顆可重放的活憑證。`passthrough` 原樣轉發 client token（0.6 之前的行為；僅在後端自己驗 token 時使用，例如 Gitea demo route）。`static` 移除 client token、改送一組固定的上游憑證。                                                                                                                                                                |
+| `upstream_auth_token`    |      | `upstream_auth_mode: static` 時必填（缺了會讓每個請求都回 `500 server_error` + critical log——絕不靜默退回其他模式）。要送給上游的憑證。用 Kong 的 `${{ env "KONG_UPSTREAM_TOKEN" }}` 替換語法避免把秘密 commit 進宣告式設定檔。                                                                                                                                                                                                                                                                          |
+| `upstream_auth_header`   |      | 僅 `static` 模式。攜帶上游憑證的 header；預設 `Authorization`，值會加上 `Bearer ` 前綴。自訂名稱（例如 `X-Api-Key`）則原樣送出、不加前綴——且 client 的 `Authorization` header **仍會被移除**。                                                                                                                                                                                                                                                                                                           |
+| `upstream_extra_headers` |      | `"Name: value"` 字串清單，**所有**模式都會設在每個上游請求上（多租戶／來源標記）。只切第一個冒號，值可以含冒號（URL）。保留名稱在驗證時直接拒絕：`Authorization`、任何 `X-MCP-*`、以及使用中的 `upstream_auth_header`。                                                                                                                                                                                                                                                                                  |
+| `skip_issuer_check`      |      | ⚠️ 預設 `false`。設 `true` 時**不**拿 token 的 `iss` claim 跟 `issuer` 比對。`issuer` 欄位仍為必填（用於 AS metadata 發現與 PRM 回應）。僅在已知 token 簽發者不帶 `iss` claim 時使用。                                                                                                                                                                                                                                                                                                                   |
+| `skip_type_check`        |      | ⚠️ 預設 `false`。設 `true` 時略過 `type=access` 檢查——refresh token 與沒有 `type` claim 的 token 都會被當成 bearer 憑證接受。僅在已知授權伺服器不發 `type` claim 時使用。                                                                                                                                                                                                                                                                                                                                |
+| `skip_control_chars`     |      | ⚠️ 預設 `false`。設 `true` 時停用對轉發 claims（`X-MCP-*` headers）的 CR/LF 注入防護。僅在以非標準 token 除錯時暫時使用。`upstream_auth_*` 的**設定值**一律無條件驗證——這個開關永遠不影響它們（設定值裡的控制字元只會是打錯字或注入,不存在合理的除錯情境）。                                                                                                                                                                                                                                             |
+| `skip_audience_check`    |      | ⚠️ 預設 `false`：`aud` **預設即強制驗證**（RFC 8707 / MCP 規範——資源伺服器 MUST 驗證 token 是簽發給自己的）。Signet 發出 per-resource `aud`：client 在 token 請求帶 `resource=<gateway_origin + resource_path>`，且該 URL 必須在 client 的 `allowed_resources` 白名單內。比對值是逐字元、區分 scheme／斜線的精確比對——沒綁定相符 `aud`（或完全沒有 `aud`）的 token 一律 `401`。僅在 token 簽發者無法發 per-resource `aud`（例如 Gitea demo route）或暫時除錯 token 簽發時才設 `true`（見下方重放警告）。 |
+| `debug_claims`           |      | ⚠️ 預設 `false`。設 `true` 時，對每個 plugin 解碼的請求把完整解碼後的 claim set 傾印到 Kong 的 debug log——方便維運人員找出非預期 `401`/`403` 背後是哪個 claim 帶著 scope／`aud`／`type`。由 config 控管，而**非**僅靠 log level（`kong.Log.Debug` 不分 `log_level` 每次呼叫都會送到 Kong），所以未主動開啟前一律關閉。需搭配 `KONG_LOG_LEVEL=debug` 才看得到輸出。claims 可能含 PII，請審慎且短暫開啟。                                                                                                  |
 
 只接受 `type=access` 的 token；Signet 的 refresh token（金鑰、`iss`、`aud`、
 `scope` 都相同，只有 `type` 與較長的 `exp` 不同）會被回 `401 invalid_token` 拒絕。
@@ -147,6 +151,18 @@ JWKS 的抓取、記憶體快取、背景輪替、未知 `kid` 的限流補抓�
 >
 > 升級後若沒綁相符 `aud` 的 token 開始收到 `401`，Kong log 的 `rejected token`
 > 行會寫明 audience 不符；`skip_audience_check: true` 是暫時的逃生口。
+>
+> **從 ≤ 0.5.x 遷移（`Authorization` 預設不再轉發）。** client 的 bearer token
+> 現在會在請求送達後端之前被**移除**（`upstream_auth_mode` 預設 `strip`）——
+> 與上面 `require_audience` 的遷移同一套判準：寧可大聲的 breaking change,
+> 不做靜默的不安全預設。若你的後端自己驗證轉發過來的 token,一行還原舊行為:
+>
+> ```yaml
+> upstream_auth_mode: "passthrough"
+> ```
+>
+> 安全的升級順序:先讓後端改信 `X-MCP-*` 身分 header(並限制它只接受來自
+> Kong 的流量——見維運注意事項),再拿掉 `passthrough` 這一行。
 
 ## 1. 編譯 plugin
 
@@ -192,17 +208,21 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
 > 例外——HS256 偽造會在抓 JWKS **之前** 就先被擋（演算法先被鎖定），回
 > `401 invalid_token`，所以即使用 placeholder 設定也是 `401`。
 
-| #   | 測試項目                   | 指令                                                                                    | 預期結果                                                        |
-| --- | -------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1   | 未認證 → 挑戰              | `curl -i $GW/mcp/server`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`        |
-| 2   | 回傳 PRM 文件              | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server`                            | JSON 含 `resource`、`authorization_servers`、`scopes_supported` |
-| 3   | 有效 token → 放行          | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | MCP upstream 回 `200`                                           |
-| 4   | 過期 token                 | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                             |
-| 5a  | 缺少 scope                 | 沒有 `required_scopes` 的 token → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                        |
-| 5b  | **跨 audience**            | 為另一個資源簽發的 token（aud 預設即強制驗證）                                          | `401 invalid_token`（aud 不符）                                 |
-| 5c  | **HS256 偽造（金鑰位元）** | 拿 RSA 公鑰當 HMAC 金鑰偽造一顆 HS256 token                                             | `401 invalid_token` — **必須被擋**（alg confusion）             |
+| #   | 測試項目                   | 指令                                                                                     | 預期結果                                                          |
+| --- | -------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1   | 未認證 → 挑戰              | `curl -i $GW/mcp/server`                                                                 | `401` + `WWW-Authenticate: Bearer resource_metadata="…"`          |
+| 2   | 回傳 PRM 文件              | `curl -s $GW/.well-known/oauth-protected-resource/mcp/server`                            | JSON 含 `resource`、`authorization_servers`、`scopes_supported`   |
+| 3   | 有效 token → 放行          | `curl -i $GW/mcp/server -H "Authorization: Bearer $GOOD"`                                | MCP upstream 回 `200`                                             |
+| 4   | 過期 token                 | `curl -i $GW/mcp/server -H "Authorization: Bearer $EXPIRED"`                             | `401 invalid_token`                                               |
+| 5a  | 缺少 scope                 | 沒有 `required_scopes` 的 token → `curl -i $GW/mcp/server -H "Authorization: Bearer $X"` | `403 insufficient_scope`                                          |
+| 5b  | **跨 audience**            | 為另一個資源簽發的 token（aud 預設即強制驗證）                                           | `401 invalid_token`（aud 不符）                                   |
+| 5c  | **HS256 偽造（金鑰位元）** | 拿 RSA 公鑰當 HMAC 金鑰偽造一顆 HS256 token                                              | `401 invalid_token` — **必須被擋**（alg confusion）               |
+| 6a  | **token 不外流到上游**     | 有效 token、預設 `strip` 模式 → 呼叫 demo 的 `whoami` 工具                               | `token_forwarded: false`——沒有 `Authorization` 到達後端           |
+| 6b  | **`X-MCP-*` 偽造**         | 有效 token（sub=alice）+ client 自帶 `X-MCP-Subject: admin` 與 `X-MCP-Foo: x`            | 後端看到 `subject: alice`（單一值、來自 token）且沒有 `X-MCP-Foo` |
 
-第 **5b** 與 **5c** 列是安全關鍵——上線前務必跑過。
+第 **5b**、**5c** 與 **6b** 列是安全關鍵——上線前務必跑過。第 6b 列用與 6a
+相同的 `whoami` 呼叫:在 client 端注入偽造 header,確認 echo 回來的身分來自
+token、不是 client 自填的值。
 
 ## Signet 端動手前確認
 
@@ -243,9 +263,16 @@ token 能通過驗證之前，請先改 `kong.yml` 讓 `issuer` / `gateway_origi
   在途 token 才不會被誤殺。
 - **access token TTL 設短。** 跟所有離線驗證一樣，被撤銷的 token 會一直有效到它的
   `exp`——以分鐘計、不要以小時計。
-- **bearer token 會原封不動往後送。** Kong 會加上 `X-MCP-*` 身分 header（`Subject`
-  / `Scope` / `Issuer` / `Audience` / `Client` / `Token-Id` / `Expires`），
-  但**不會**移除或換掉 `Authorization` header，所以每個 MCP 後端都會拿到一顆可重放的
-  有效 token。請據此信任你的 MCP 後端，並維持預設的 `aud` 驗證（不要設
-  `skip_audience_check`），讓後端無法拿 token 去重放到另一個資源——但對
-  **同一個**資源仍可重放到 `exp` 為止。
+- **bearer token 預設不會送到後端。** 驗證完後,Kong 設定可信的 `X-MCP-*` 身分
+  header（`Subject` / `Scope` / `Issuer` / `Audience` / `Client` / `Token-Id`
+  / `Expires`）、清掉 client 自帶的其他任何 `X-MCP-*` 名稱,並在預設的
+  `upstream_auth_mode: strip` 下移除 `Authorization` header——後端從此不再持有
+  一顆可重放的活憑證。生效的模式會在 `info` level 記一行 log
+  （`upstream auth mode: …`）。兩個推論:
+  - **`passthrough` 會恢復舊的暴露面。** 設了它,每個 MCP 後端都會拿到一顆對
+    **同一個**資源可重放到 `exp` 為止的活 token;請維持預設的 `aud` 驗證
+    （不要設 `skip_audience_check`）,至少讓它跨不到 sibling 資源。
+  - **`strip`/`static` 模式下,`X-MCP-*` 是後端唯一的身分來源——所以後端
+    MUST 只接受來自 Kong 的流量**（network policy / mTLS / 私有網路）。任何
+    繞過 gateway 的路徑都等於讓呼叫者自填 `X-MCP-Subject`。這本來就是部署
+    契約;少了 token 當第二道防線後,它現在是承重牆。
